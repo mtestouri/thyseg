@@ -4,3 +4,5 @@ __pycache__/
 dataset/
 *.txt
 *.csv
+*.h5
+segmentations/

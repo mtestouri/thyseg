@@ -1,12 +1,7 @@
-import sys
 import argparse
-from cytomine import Cytomine
-from dataset import build_dataset
-
-host = "https://research.cytomine.be"
-public_key = 'b8a99025-7dfa-41af-b317-eb98c3c55302'
-private_key = 'd7c53597-0de4-4255-b7cd-9e3db60bddc2'
-project_id = 77150529
+from dataset import download_dataset
+from dataset import load_train_set, load_test_set
+from segmenter import Segmenter
 
 if __name__ == "__main__":
     # parse arguments
@@ -48,16 +43,19 @@ if __name__ == "__main__":
                 exit(1)
         else:
             print("error: unknown mode: " + mode)
-            exit(1)
-    
+            exit(1) 
+
     if(dataset):
-        print("building the dataset..")
-        with Cytomine(host=host, public_key=public_key, private_key=private_key, verbose=None) as conn:
-            build_dataset(args.f)
+        print("downloading dataset..")
+        download_dataset(args.f)
         print("dataset done")
     if(train):
         print("training the model..")
+        (x_train, y_train) = load_train_set()
+        Segmenter().train(x_train, y_train, 'segmenter.h5')
         print("training done")
     if(segment):
         print("segmenting..")
+        (x_test, y_test) = load_test_set()
+        Segmenter().segment(x_test, y_test, 'segmenter.h5')
         print("segmentation done")
