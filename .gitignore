@@ -6,3 +6,5 @@ dataset/
 *.csv
 *.h5
 segmentations/
+dataset_full/
+dataset_selected/

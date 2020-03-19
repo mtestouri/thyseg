@@ -1,7 +1,7 @@
-import argparse
-from dataset import download_dataset
-from dataset import load_train_set, load_test_set
-from segmenter import Segmenter
+import argparse 
+from dataset import download_dataset, load_dataset
+from unet import UnetSegmenter
+from unet_keras import UnetKeras
 
 if __name__ == "__main__":
     # parse arguments
@@ -51,11 +51,13 @@ if __name__ == "__main__":
         print("dataset done")
     if(train):
         print("training the model..")
-        (x_train, y_train) = load_train_set()
-        Segmenter().train(x_train, y_train, 'segmenter.h5')
+        (x_train, y_train) = load_dataset('train')
+        UnetSegmenter().train(x_train, y_train, 'unet.h5')
+        #UnetKeras().train(x_train, y_train, 'unet_keras.h5')
         print("training done")
     if(segment):
         print("segmenting..")
-        (x_test, y_test) = load_test_set()
-        Segmenter().segment(x_test, y_test, 'segmenter.h5')
+        (x_test, y_test) = load_dataset('test')
+        UnetSegmenter().segment(x_test, y_test, 'unet.h5')
+        #UnetKeras().segment(x_test, y_test, 'unet_keras.h5')
         print("segmentation done")

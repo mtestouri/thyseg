@@ -9,7 +9,7 @@ import random
 
 X_SIZE = 512
 SEED = 42
-SPLIT = 0.7
+SPLIT = 0.95
 
 # cytomine connection
 host = "https://research.cytomine.be"
@@ -37,48 +37,44 @@ def download_dataset(filename):
                 slice_image = image.reference_slice()
                 slice_image.window(x, y, X_SIZE, X_SIZE, 
                                     dest_pattern="dataset/" + str(i) + "_x.jpg")
-
-                #image = cv2.imread("dataset/" + str(i) + "_x.jpg")
-                #print(np.shape(image))
-            
                 slice_image.window(x, y, X_SIZE, X_SIZE, 
                                     dest_pattern="dataset/" + str(i) + "_y.jpg",
                                     mask=True,
                                     terms=annotation.term)
             i += 1
-            if(i == 100):
-                break
 
-def load_train_set():
+def load_dataset(type):
     # load dataset filenames
     files = glob("dataset/*_x.jpg")
     random.Random(SEED).shuffle(files)
-    nb_files = len(files)
+    if type == 'train':
+        files = files[:round(SPLIT*len(files))]
+    elif type == 'test':
+        files = files[round(SPLIT*len(files)):]
+    else:
+        print("error: invalid dataset type '" + type + "'")
+        exit(1)
     # load files
-    train_files = files[:round(SPLIT*nb_files)]
-    x_train = []
-    y_train = []
-    for filename in train_files:
-        x_train.append(cv2.imread(filename))
-        y_train.append(cv2.imread("dataset/" + filename[8] + "_y.jpg"))
-    x_train = np.array(x_train)
-    y_train = np.array(y_train)
+    x = np.empty((len(files), X_SIZE, X_SIZE, 3), dtype=np.float32)
+    y = np.empty((len(files), X_SIZE, X_SIZE, 3), dtype=np.float32)
+    i = 0
+    for filename in files:
+        x_img = cv2.imread(filename)
+        y_img = cv2.imread("dataset/" + filename[8:len(filename)-6] + "_y.jpg")
+        if(np.shape(x_img) != (X_SIZE, X_SIZE, 3)):
+            x_img = cv2.resize(x_img, (X_SIZE, X_SIZE), interpolation=cv2.INTER_LINEAR)
+            y_img = cv2.resize(y_img, (X_SIZE, X_SIZE), interpolation=cv2.INTER_LINEAR)
+        x[i] = x_img
+        y[i] = y_img
+        i += 1
+    # create classes
+    y = y/255 # normalize
+    y = y*[1, 1, 0] + [-1, 0, 0]
+    y = np.abs(y)
+    
+    #for i in range(len(y)):
+    #    for j in range(len(y[i])):
+    #        for k in range(len(y[i, j])):
+    #            print(y[i, j, k])
 
-    return [x_train, y_train]
-
-def load_test_set():
-    # load dataset filenames
-    files = glob("dataset/*_x.jpg")
-    random.Random(SEED).shuffle(files)
-    nb_files = len(files)
-    # load files
-    test_files = files[round(SPLIT*nb_files):]
-    x_test = []
-    y_test = []
-    for filename in test_files:
-        x_test.append(cv2.imread(filename))
-        y_test.append(cv2.imread("dataset/" + filename[8] + "_y.jpg"))
-    x_test = np.array(x_test)
-    y_test = np.array(y_test)
-
-    return [x_test, y_test]
+    return [x, y]
