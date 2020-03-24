@@ -7,7 +7,7 @@ from cytomine.models import ImageInstance, Annotation
 from glob import glob
 import random
 
-X_SIZE = 512
+X_SIZE = 512 #TODO W H instead
 SEED = 42
 SPLIT = 0.95
 
