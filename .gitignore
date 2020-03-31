@@ -7,3 +7,4 @@ dataset/
 *.pth
 segmentations/
 dataset_full/
+dataset_bak/

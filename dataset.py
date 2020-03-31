@@ -1,16 +1,15 @@
 import pandas as pd
-import cv2
 import numpy as np
 from cytomine import Cytomine
 from cytomine.models import ImageInstance, Annotation
-
 from glob import glob
 import random
+import cv2
 
-X_SIZE = 512 #TODO W H instead
+# dataset parameters
 SEED = 42
-SPLIT = 0.95
-
+IMG_HW = 512
+SPLIT = 0.8
 # cytomine connection
 host = "https://research.cytomine.be"
 public_key = 'b8a99025-7dfa-41af-b317-eb98c3c55302'
@@ -18,26 +17,28 @@ private_key = 'd7c53597-0de4-4255-b7cd-9e3db60bddc2'
 project_id = 77150529
 
 def download_dataset(filename):
-    with Cytomine(host=host, public_key=public_key, private_key=private_key, verbose=None) as conn:
+    with Cytomine(host=host, public_key=public_key, private_key=private_key,
+                  verbose=None) as conn:
+        # dataset descriptor
         array = pd.read_csv(filename, sep=';').to_numpy()
-
+        # download the images
         i = 0
         for row in array:
             if(i > 0):
                 annotation = Annotation()
                 annotation.id = int(row[0])
                 annotation.fetch()
-
                 image = ImageInstance()
                 image.id = int(row[5])
                 image.fetch()
-            
-                x = round(float(row[3])-(X_SIZE/2))
-                y = image.height - round(float(row[4])+(X_SIZE/2))
+                # convert the coordinates
+                x = round(float(row[3])-(IMG_HW/2))
+                y = image.height - round(float(row[4])+(IMG_HW/2))
+                # download slice and corresponding mask 
                 slice_image = image.reference_slice()
-                slice_image.window(x, y, X_SIZE, X_SIZE, 
+                slice_image.window(x, y, IMG_HW, IMG_HW, 
                                     dest_pattern="dataset/" + str(i) + "_x.jpg")
-                slice_image.window(x, y, X_SIZE, X_SIZE, 
+                slice_image.window(x, y, IMG_HW, IMG_HW, 
                                     dest_pattern="dataset/" + str(i) + "_y.jpg",
                                     mask=True,
                                     terms=annotation.term)
@@ -55,26 +56,26 @@ def load_dataset(type):
         print("error: invalid dataset type '" + type + "'")
         exit(1)
     # load files
-    x = np.empty((len(files), X_SIZE, X_SIZE, 3), dtype=np.float32)
-    y = np.empty((len(files), X_SIZE, X_SIZE, 3), dtype=np.float32)
+    x = np.empty((len(files), IMG_HW, IMG_HW, 3), dtype=np.uint8)
+    y = np.empty((len(files), IMG_HW, IMG_HW, 3), dtype=np.uint8)
     i = 0
     for filename in files:
         x_img = cv2.imread(filename)
         y_img = cv2.imread("dataset/" + filename[8:len(filename)-6] + "_y.jpg")
-        if(np.shape(x_img) != (X_SIZE, X_SIZE, 3)):
-            x_img = cv2.resize(x_img, (X_SIZE, X_SIZE), interpolation=cv2.INTER_LINEAR)
-            y_img = cv2.resize(y_img, (X_SIZE, X_SIZE), interpolation=cv2.INTER_LINEAR)
+        if(np.shape(x_img) != (IMG_HW, IMG_HW, 3)):
+            x_img = cv2.resize(x_img, (IMG_HW, IMG_HW), interpolation=cv2.INTER_LINEAR)
+            y_img = cv2.resize(y_img, (IMG_HW, IMG_HW), interpolation=cv2.INTER_LINEAR)
         x[i] = x_img
         y[i] = y_img
         i += 1
-    # create classes
-    y = y/255 # normalize
-    y = y*[1, 1, 0] + [-1, 0, 0]
-    y = np.abs(y)
-    
+    # convert RGB masks to classe masks
+    y = np.int64(np.round(y/255))[:, :, :, 0]
+    #for i in range(len(x)):
+    #    for j in range(len(x[i])):
+    #        for k in range(len(x[i, j])):
+    #            print(x[i, j, k])
     #for i in range(len(y)):
     #    for j in range(len(y[i])):
     #        for k in range(len(y[i, j])):
     #            print(y[i, j, k])
-
     return [x, y]
