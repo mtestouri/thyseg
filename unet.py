@@ -23,8 +23,8 @@ class UnetSegmenter(Segmenter):
         # training parameters
         num_epochs = 2
         learning_rate = 0.001
-        criterion = nn.CrossEntropyLoss()
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate) #TODO test SGD
+        criterion = nn.BCEWithLogitsLoss()
+        optimizer = torch.optim.SGD(self.model.parameters(), lr=learning_rate)
         # train loop
         n_iterations = math.ceil(len(train_set)/batch_size)
         for epoch in range(num_epochs):
@@ -33,7 +33,7 @@ class UnetSegmenter(Segmenter):
                 x = x.to(self.device)
                 y = y.to(self.device)
                 # forward pass
-                y_pred = self.model(x.float())
+                y_pred = self.model(x)
                 loss = criterion(y_pred, y)
                 # backward pass
                 optimizer.zero_grad()
@@ -56,14 +56,14 @@ class UnetSegmenter(Segmenter):
         # predictions
         im_h = x_test.shape[1]
         im_w = x_test.shape[2]
-        y_preds = np.empty((len(x_test), im_h, im_w), dtype=np.float32)
+        y_preds = np.empty((len(x_test), im_h, im_w, 2), dtype=np.float32)
         for i, x in enumerate(x_test):
             with torch.no_grad():
                 x = torch.from_numpy(x.reshape(1, 3, im_h, im_w))
-                y_pred = self.model(x.float())
+                y_pred = self.model(x)
                 y_pred = F.softmax(y_pred, dim=1) #TODO sum not 1 !!
                 y_pred = y_pred.squeeze(0).reshape(im_h, im_w, 2)
-                y_preds[i] = y_pred[:, :, 1].cpu().numpy() # TODO maybe take 1 or both
+                y_preds[i] = y_pred.cpu().numpy()
             print(f'segmentation: {i+1}/{len(x_test)}', end='\r')
         print('')
         self.model = self.model.to('cuda')
@@ -139,6 +139,7 @@ class UpConv2x2(nn.Module):
 class ImgSet(Dataset):
     def __init__(self, x, y):
         x = x.reshape(x.shape[0], 3, x.shape[1], x.shape[2])
+        y = y.reshape(y.shape[0], 2, y.shape[1], y.shape[2])
         self.x = torch.from_numpy(x)
         self.y = torch.from_numpy(y)
         self.n_samples = x.shape[0]

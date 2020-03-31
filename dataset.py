@@ -56,8 +56,8 @@ def load_dataset(type):
         print("error: invalid dataset type '" + type + "'")
         exit(1)
     # load files
-    x = np.empty((len(files), IMG_HW, IMG_HW, 3), dtype=np.uint8)
-    y = np.empty((len(files), IMG_HW, IMG_HW, 3), dtype=np.uint8)
+    x = np.empty((len(files), IMG_HW, IMG_HW, 3), dtype=np.float32)
+    y = np.empty((len(files), IMG_HW, IMG_HW, 3), dtype=np.float32)
     i = 0
     for filename in files:
         x_img = cv2.imread(filename)
@@ -69,7 +69,7 @@ def load_dataset(type):
         y[i] = y_img
         i += 1
     # convert RGB masks to classe masks
-    y = np.int64(np.round(y/255))[:, :, :, 0]
+    y = np.abs(np.round(y/255)[:, :, :, :2] - (1, 0))
     #for i in range(len(x)):
     #    for j in range(len(x[i])):
     #        for k in range(len(x[i, j])):

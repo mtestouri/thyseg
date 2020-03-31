@@ -4,11 +4,14 @@ from unet import UnetSegmenter
 
 if __name__ == "__main__":
     # parse arguments
-    parser = argparse.ArgumentParser(description='Cell segmentation in whole-slide cytological images of the thyroid.')
-    parser.add_argument('-f', metavar='filename', help='filename of the dataset descriptor')
-    parser.add_argument('-m', metavar='modes', nargs='+', help='modes: dataset, train, segment')
+    parser = argparse.ArgumentParser(description='Cell segmentation in '
+                                     + 'whole-slide cytological images '
+                                     + 'of the thyroid.')
+    parser.add_argument('-f', metavar='filename', 
+                        help='filename of the dataset descriptor')
+    parser.add_argument('-m', metavar='modes', nargs='+', 
+                        help='modes: dataset, train, segment')
     args = parser.parse_args()
-
     # check modes
     dataset = False
     train = False
@@ -43,7 +46,7 @@ if __name__ == "__main__":
         else:
             print("error: unknown mode: " + mode)
             exit(1) 
-
+    # run selected modes
     if(dataset):
         print("downloading dataset..")
         download_dataset(args.f)
