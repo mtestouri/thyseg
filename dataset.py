@@ -68,14 +68,5 @@ def load_dataset(type):
         x[i] = x_img
         y[i] = y_img
         i += 1
-    # convert RGB masks to classe masks
-    y = np.abs(np.round(y/255)[:, :, :, :2] - (1, 0))
-    #for i in range(len(x)):
-    #    for j in range(len(x[i])):
-    #        for k in range(len(x[i, j])):
-    #            print(x[i, j, k])
-    #for i in range(len(y)):
-    #    for j in range(len(y[i])):
-    #        for k in range(len(y[i, j])):
-    #            print(y[i, j, k])
+    y = np.abs(np.round(y/255)[:, :, :, :2] - (1, 0)) # RGB masks to classe masks
     return [x, y]

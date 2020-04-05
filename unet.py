@@ -1,3 +1,4 @@
+import sys
 from segmenter import Segmenter
 import torch
 import torch.nn as nn
@@ -6,6 +7,15 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 import math
 import numpy as np
+
+def dice_loss(y_pred, y):
+    smooth = 1.
+    y_pred = torch.sigmoid(y_pred).view(len(y_pred), -1)
+    y = y.view(len(y), -1)
+    intersection = torch.sum(y_pred * y)
+    sum_a = torch.sum(y_pred * y_pred)
+    sum_b = torch.sum(y * y)
+    return 1 - ((2. * intersection + smooth) / (sum_a + sum_b + smooth))
 
 class UnetSegmenter(Segmenter):
     def __init__(self):
@@ -22,13 +32,16 @@ class UnetSegmenter(Segmenter):
         data_loader = DataLoader(dataset=train_set, batch_size=batch_size,
                                  num_workers=2)
         # training parameters
-        num_epochs = 2
+        num_epochs = 8
         learning_rate = 0.0001
         criterion = nn.BCEWithLogitsLoss()
         optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
         # train loop
         n_iterations = math.ceil(len(train_set)/batch_size)
         for epoch in range(num_epochs):
+            print('')
+            sum_loss = 0
+            sum_dice = 0
             for i, (x, y) in enumerate(data_loader):
                 # batch
                 x = x.to(self.device)
@@ -36,15 +49,19 @@ class UnetSegmenter(Segmenter):
                 # forward pass
                 y_pred = self.model(x)
                 loss = criterion(y_pred, y)
+                sum_loss += loss.item()
+                sum_dice += dice_loss(y_pred, y).item() # compute dice loss
                 # backward pass
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
                 # verbose
+                sys.stdout.write("\033[F") # move cursor up
+                sys.stdout.write("\033[K") # clear line
                 print("epoch: " + str(epoch+1) + "/" + str(num_epochs)
                       + ", step: " + str(i+1) + "/" + str(n_iterations)
-                      + ", loss: " + str(round(loss.item(), 4)), end='\r')
-            print('')
+                      + ", avg_loss: " + str(round(sum_loss/(i + 1), 4))
+                      + ", avg_dice_loss: " + str(round(sum_dice/(i + 1), 4)))
         # save model
         if model_file:
             torch.save(self.model.state_dict(), model_file)
@@ -57,15 +74,14 @@ class UnetSegmenter(Segmenter):
         test_set = ImgSet(x_test)
         data_loader = DataLoader(dataset=test_set, batch_size=1, num_workers=2)
         # init predicted masks
-        im_h = x_test.shape[1]
-        im_w = x_test.shape[2]
-        y_preds = np.empty((len(x_test), im_h, im_w, 2), dtype=np.float32)
+        y_preds = np.empty((len(x_test), x_test.shape[1], x_test.shape[2], 2), 
+                           dtype=np.float32)
         # compute predictions
         for i, x in enumerate(data_loader):
             with torch.no_grad():
                 x = x.to(self.device)
-                y_pred = F.softmax(self.model(x), dim=1) #TODO sum prob of classes is not 1
-                y_preds[i] = y_pred.squeeze(0).reshape(im_h, im_w, 2).cpu().numpy()
+                y_pred = torch.round(torch.sigmoid(self.model(x)))
+                y_preds[i] = y_pred.permute(0, 2, 3, 1).squeeze(0).cpu().numpy()
             print(f'segmentation: {i+1}/{len(test_set)}', end='\r')
         print('')
         return y_preds
@@ -128,12 +144,17 @@ class Unet(nn.Module):
 class Conv3x3(nn.Module):
     def __init__(self, in_ch, out_ch):
         super(Conv3x3, self).__init__()
-        self.conv1 = nn.Conv2d(in_ch, out_ch, 3, padding=1)
-        self.conv2 = nn.Conv2d(out_ch, out_ch, 3, padding=1)
-        #self.dropout = nn.Dropout(0.5)
+        self.conv3x3 = nn.Sequential(
+            nn.Conv2d(in_ch, out_ch, 3, padding=1),
+            nn.BatchNorm2d(out_ch),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(out_ch, out_ch, 3, padding=1),
+            nn.BatchNorm2d(out_ch),
+            nn.ReLU(inplace=True)
+        )
 
     def forward(self, x):
-        return F.relu(self.conv2(F.relu(self.conv1(x))))
+        return self.conv3x3(x)
 
 class Conv1x1(nn.Module):
     def __init__(self, in_ch, out_ch):
@@ -157,17 +178,12 @@ class UpConv2x2(nn.Module):
 
 class ImgSet(Dataset):
     def __init__(self, x, y=None):
-        self.n_samples = x.shape[0]
         # images
-        x = x.reshape(x.shape[0], 3, x.shape[1], x.shape[2])
-        self.x = torch.from_numpy(x)#/255
-        #tf = transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.25, 0.25, 0.25))
-        #for i in range(len(self.x)):
-        #    self.x[i] = tf(self.x[i])
+        self.n_samples = len(x)
+        self.x = torch.from_numpy(x).float().permute(0, 3, 1, 2)
         # masks
         if y is not None:
-            y = y.reshape(y.shape[0], 2, y.shape[1], y.shape[2])
-            self.y = torch.from_numpy(y)
+            self.y = torch.from_numpy(y).float().permute(0, 3, 1, 2)
         else:
             self.y = None
         

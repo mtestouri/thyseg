@@ -9,15 +9,13 @@ if __name__ == "__main__":
                                      + 'of the thyroid.')
     parser.add_argument('-f', metavar='filename', 
                         help='filename of the dataset descriptor')
-    parser.add_argument('-m', metavar='modes', nargs='+', 
+    parser.add_argument('m', metavar='modes', nargs='+', 
                         help='modes: dataset, train, segment')
     args = parser.parse_args()
     # check modes
     dataset = False
     train = False
     segment = False
-    if(args.m is None):
-       args.m = ['segment'] # default mode
     if(len(args.m) > 3):
         print("error: there must be between 1 and 3 different modes")
         exit(1)
