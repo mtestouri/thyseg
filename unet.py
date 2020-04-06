@@ -90,61 +90,56 @@ class Unet(nn.Module):
     def __init__(self, init_depth=32, n_classes=2):
         super(Unet, self).__init__()
         # encoder
-        self.pool = nn.MaxPool2d((2, 2))
         in_ch = 3
         out_ch = init_depth
-        self.conv1 = Conv3x3(in_ch, out_ch)
+        self.conv1 = ConvBlock(in_ch, out_ch)
         in_ch = out_ch
         out_ch = out_ch*2
-        self.conv2 = Conv3x3(in_ch, out_ch)
+        self.conv2 = ConvBlock(in_ch, out_ch)
         in_ch = out_ch
         out_ch = out_ch*2
-        self.conv3 = Conv3x3(in_ch, out_ch)
+        self.conv3 = ConvBlock(in_ch, out_ch)
         in_ch = out_ch
         out_ch = out_ch*2
-        self.conv4 = Conv3x3(in_ch, out_ch)
+        self.conv4 = ConvBlock(in_ch, out_ch)
         in_ch = out_ch
         out_ch = out_ch*2
-        self.conv5 = Conv3x3(in_ch, out_ch)
+        self.conv5 = ConvBlock(in_ch, out_ch, pool=False)
         # decoder
         in_ch = out_ch
         out_ch = int(out_ch/2)
-        self.up_conv6 = UpConv2x2(in_ch, out_ch)
+        self.up_conv6 = UpConvBlock(in_ch, out_ch)
         in_ch = out_ch
         out_ch = int(out_ch/2)
-        self.up_conv7 = UpConv2x2(in_ch, out_ch)
+        self.up_conv7 = UpConvBlock(in_ch, out_ch)
         in_ch = out_ch
         out_ch = int(out_ch/2)
-        self.up_conv8 = UpConv2x2(in_ch, out_ch)
+        self.up_conv8 = UpConvBlock(in_ch, out_ch)
         in_ch = out_ch
         out_ch = int(out_ch/2)
-        self.up_conv9 = UpConv2x2(in_ch, out_ch)
+        self.up_conv9 = UpConvBlock(in_ch, out_ch)
         in_ch = out_ch
-        self.conv10 = Conv1x1(in_ch, n_classes)
+        self.conv10 = nn.Conv2d(in_ch, n_classes, 1)
     
     def forward(self, x):
         # encoder
-        x1 = self.conv1(x)
-        x = self.pool(x1)
-        x2 = self.conv2(x)
-        x = self.pool(x2)
-        x3 = self.conv3(x)
-        x = self.pool(x3)
-        x4 = self.conv4(x)
-        x = self.pool(x4)
+        x = self.conv1(x)
+        x = self.conv2(x)
+        x = self.conv3(x)
+        x = self.conv4(x)
         x = self.conv5(x)
         # decoder
-        x = self.up_conv6(x, x4)
-        x = self.up_conv7(x, x3)
-        x = self.up_conv8(x, x2)
-        x = self.up_conv9(x, x1)
+        x = self.up_conv6(x, self.conv4.skip_x)
+        x = self.up_conv7(x, self.conv3.skip_x)
+        x = self.up_conv8(x, self.conv2.skip_x)
+        x = self.up_conv9(x, self.conv1.skip_x)
         x = self.conv10(x)
         return x
 
-class Conv3x3(nn.Module):
-    def __init__(self, in_ch, out_ch):
-        super(Conv3x3, self).__init__()
-        self.conv3x3 = nn.Sequential(
+class ConvBlock(nn.Module):
+    def __init__(self, in_ch, out_ch, pool=True):
+        super(ConvBlock, self).__init__()
+        self.conv_block = nn.Sequential(
             nn.Conv2d(in_ch, out_ch, 3, padding=1),
             nn.BatchNorm2d(out_ch),
             nn.ReLU(inplace=True),
@@ -152,21 +147,21 @@ class Conv3x3(nn.Module):
             nn.BatchNorm2d(out_ch),
             nn.ReLU(inplace=True)
         )
+        self.skip_x = torch.Tensor()
+        if pool:
+            self.pool = nn.MaxPool2d((2, 2))
+        else:
+            self.pool = None
 
     def forward(self, x):
-        return self.conv3x3(x)
+        self.skip_x = self.conv_block(x)
+        if self.pool:
+            return self.pool(self.skip_x)
+        return self.skip_x
 
-class Conv1x1(nn.Module):
+class UpConvBlock(nn.Module):
     def __init__(self, in_ch, out_ch):
-        super(Conv1x1, self).__init__()
-        self.conv = nn.Conv2d(in_ch, out_ch, 1)
-
-    def forward(self, x):
-        return self.conv(x)
-
-class UpConv2x2(nn.Module):
-    def __init__(self, in_ch, out_ch):
-        super(UpConv2x2, self).__init__()
+        super(UpConvBlock, self).__init__()
         self.up = nn.ConvTranspose2d(in_ch, out_ch, 2, stride=2)
         self.conv1 = nn.Conv2d(in_ch, out_ch, 3, padding=1)
         self.conv2 = nn.Conv2d(out_ch, out_ch, 3, padding=1)
