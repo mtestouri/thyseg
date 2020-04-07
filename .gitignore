@@ -1,10 +1,9 @@
 .vscode/
 tfe/
 __pycache__/
-dataset/
+dataset*/
 *.txt
 *.csv
 *.pth
 segmentations/
-dataset_full/
-dataset_bak/
+*.tar.gz
