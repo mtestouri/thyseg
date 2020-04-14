@@ -22,7 +22,7 @@ class Segmenter:
     def load_model(self, model_file):
         self.model.load_state_dict(torch.load(model_file))
 
-    def train(self, dataset):
+    def train(self, dataset, num_epochs):
         raise NotImplementedError
 
     def segment(self, dataset):

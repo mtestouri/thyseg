@@ -17,17 +17,33 @@ def dice_loss(y_pred, y):
     sum_b = torch.sum(y * y)
     return 1 - ((2. * intersection + smooth) / (sum_a + sum_b + smooth))
 
+class SegLoss(nn.Module):
+    def __init__(self, mode='both'):
+        super().__init__()
+        if mode != 'both' and mode != 'bce' and mode != 'dice':
+            raise ValueError("invalid mode argument '" + mode + "'")
+        self.mode = mode
+        self.bce_loss = nn.BCEWithLogitsLoss()
+
+    def forward(self, y_pred, y):
+        if self.mode == 'bce':
+            return self.bce_loss(y_pred, y)
+        if self.mode == 'dice':
+            return dice_loss(y_pred, y)
+        return self.bce_loss(y_pred, y) + dice_loss(y_pred, y)
+
 class UnetSegmenter(Segmenter):
     def init_model(self):
         return Unet()
 
-    def train(self, dataset):
+    def train(self, dataset, num_epochs):
         print("training the model..")
+        if num_epochs < 1:
+            raise ValueError("'num_epochs' must be greater than 0")
         # training parameters
         batch_size = 1
-        num_epochs = 3
         learning_rate = 0.0001
-        criterion = nn.BCEWithLogitsLoss()
+        criterion = SegLoss() # custom loss
         optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
         # train loop
         data_loader = DataLoader(dataset=dataset, batch_size=batch_size,

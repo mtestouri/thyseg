@@ -65,8 +65,7 @@ class ImgSet(Dataset):
         # load dataset filenames
         files = glob(self.df + "/*_x.jpg")
         if len(files) == 0:
-            print("error: no files found in folder '" + folder + "'")
-            exit(1)
+            raise FileNotFoundError("no files found in folder '" + folder + "'")
         # shuffle the files
         random.Random(SEED).shuffle(files)
         if type == 'train':
@@ -74,8 +73,7 @@ class ImgSet(Dataset):
         elif type == 'test':
             self.files = files[round(SPLIT*len(files)):]
         else:
-            print("error: invalid dataset type '" + type + "'")
-            exit(1)
+            raise ValueError("invalid dataset type '" + type + "'")
         
     def __getitem__(self, index):
         # load image files
@@ -84,7 +82,7 @@ class ImgSet(Dataset):
         x = cv2.imread(x_file)
         y = cv2.imread(y_file)
         if y is None: #TODO investigate why this happens
-            raise Exception("error: unable to load '" + y_file + "'")
+            raise FileNotFoundError("unable to load '" + y_file + "'")
         if(np.shape(x) != (IMG_HW, IMG_HW, 3)):
             x = cv2.resize(x, (IMG_HW, IMG_HW), interpolation=cv2.INTER_LINEAR)
             y = cv2.resize(y, (IMG_HW, IMG_HW), interpolation=cv2.INTER_LINEAR)
