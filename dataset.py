@@ -1,3 +1,4 @@
+import os
 import sys
 import logging
 import pandas as pd
@@ -21,11 +22,14 @@ private_key = 'd7c53597-0de4-4255-b7cd-9e3db60bddc2'
 logger = logging.getLogger()
 logger.disabled = True
 
-def download_dataset(filename):
+def download_dataset(filename, folder):
     print("downloading dataset..")
     with Cytomine(host=host, 
                   public_key=public_key, 
                   private_key=private_key) as conn:
+        # create folder
+        if not os.path.exists(folder):
+            os.makedirs(folder)
         # dataset descriptor
         array = pd.read_csv(filename, sep=';').to_numpy()
         # download the images
@@ -42,10 +46,10 @@ def download_dataset(filename):
             y = image.height - round(float(row[4])+(IMG_HW/2))
             # download slice and corresponding mask 
             slice_image = image.reference_slice()
-            slice_image.window(x, y, IMG_HW, IMG_HW, 
-                               dest_pattern="dataset/" + str(i) + "_x.jpg")
-            slice_image.window(x, y, IMG_HW, IMG_HW, 
-                               dest_pattern="dataset/" + str(i) + "_y.jpg",
+            slice_image.window(x, y, IMG_HW, IMG_HW, dest_pattern=folder
+                               + "/" + str(i) + "_x.jpg")
+            slice_image.window(x, y, IMG_HW, IMG_HW, dest_pattern=folder 
+                               + "/" + str(i) + "_y.jpg",
                                mask=True,
                                terms=annotation.term)
             if i > 1:
@@ -56,9 +60,14 @@ def download_dataset(filename):
     print("dataset downloaded")
 
 class ImgSet(Dataset):
-    def __init__(self, type):
+    def __init__(self, folder, type):
+        self.df = folder
         # load dataset filenames
-        files = glob("dataset/*_x.jpg")
+        files = glob(self.df + "/*_x.jpg")
+        if len(files) == 0:
+            print("error: no files found in folder '" + folder + "'")
+            exit(1)
+        # shuffle the files
         random.Random(SEED).shuffle(files)
         if type == 'train':
             self.files = files[:round(SPLIT*len(files))]
@@ -70,12 +79,12 @@ class ImgSet(Dataset):
         
     def __getitem__(self, index):
         # load image files
-        x_filename = self.files[index]
-        y_filename = "dataset/" + x_filename[8:len(x_filename)-6] + "_y.jpg"
-        x = cv2.imread(x_filename)
-        y = cv2.imread(y_filename)
+        x_file = self.files[index]
+        y_file = self.df + "/" + x_file[len(self.df):len(x_file)-6] + "_y.jpg"
+        x = cv2.imread(x_file)
+        y = cv2.imread(y_file)
         if y is None: #TODO investigate why this happens
-            raise Exception("error: unable to load '" + y_filename + "'")
+            raise Exception("error: unable to load '" + y_file + "'")
         if(np.shape(x) != (IMG_HW, IMG_HW, 3)):
             x = cv2.resize(x, (IMG_HW, IMG_HW), interpolation=cv2.INTER_LINEAR)
             y = cv2.resize(y, (IMG_HW, IMG_HW), interpolation=cv2.INTER_LINEAR)

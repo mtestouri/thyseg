@@ -42,7 +42,7 @@ class Segmenter:
             with torch.no_grad():
                 # compute prediction
                 x = x.to(self.device)
-                y_pred = torch.round(torch.sigmoid(self.model(x))) #TODO round ?
+                y_pred = torch.sigmoid(self.model(x)) #TODO round ?
                 # convert tensors to numpy
                 x = x.permute(0, 2, 3, 1).squeeze(0).cpu().numpy()
                 y = y.permute(0, 2, 3, 1).squeeze(0).numpy()

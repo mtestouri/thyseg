@@ -7,10 +7,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Cell segmentation in '
                                      + 'whole-slide cytological images '
                                      + 'of the thyroid.')
-    parser.add_argument('-d', metavar='filename', 
+    parser.add_argument('-dd', metavar='filename', 
                         help='filename of the dataset descriptor')
+    parser.add_argument('-mf', metavar='filename', 
+                        help='filename of the model to load/save')
     parser.add_argument('m', metavar='modes', nargs='+', 
                         help='modes: dataset, train, segment')
+    parser.add_argument('df', metavar='folder', help='directory of the dataset')
     args = parser.parse_args()
     # check modes
     dataset = False
@@ -21,7 +24,7 @@ if __name__ == "__main__":
         exit(1)
     for mode in args.m:
         if(mode == 'dataset'):
-            if(args.d is None):
+            if(args.dd is None):
                 print("error: must provide a dataset descriptor")
                 exit(1)
             if(not dataset):
@@ -46,12 +49,14 @@ if __name__ == "__main__":
             exit(1) 
     # run selected modes
     if(dataset):
-        download_dataset(args.d)
-    if(train):
+        download_dataset(args.dd, args.df)
+    if(train or segment):
         segmenter = UnetSegmenter()
-        segmenter.train(ImgSet('train'))
-        segmenter.save_model('unet.pth')
-    if(segment):
-        segmenter = UnetSegmenter()
-        segmenter.load_model('unet.pth')
-        segmenter.segment(ImgSet('test'))
+        if(train):
+            segmenter.train(ImgSet(args.df, 'train'))
+            if args.mf:
+                segmenter.save_model(args.mf)
+        if(segment):
+            if args.mf:
+                segmenter.load_model(args.mf)
+            segmenter.segment(ImgSet(args.df, 'test'))
