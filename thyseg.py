@@ -1,5 +1,5 @@
 import argparse 
-from dataset import download_dataset, ImgSet
+from dataset import download_dataset, split_dataset, ImgSet
 from unet import UnetSegmenter
 
 if __name__ == "__main__":
@@ -7,55 +7,47 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Cell segmentation in '
                                      + 'whole-slide cytological images '
                                      + 'of the thyroid.')
-    parser.add_argument('-dd', metavar='filename', 
+    parser.add_argument('-desc', metavar='filename', 
                         help='filename of the dataset descriptor')
-    parser.add_argument('-mf', metavar='filename', 
+    parser.add_argument('-imhw', metavar='number', type=int,
+                        help='image height and width')
+    parser.add_argument('-seed', metavar='number', type=int, help='seed value')
+    parser.add_argument('-split', metavar='number', type=float,
+                        help='split value')
+    parser.add_argument('-model', metavar='filename', 
                         help='filename of the model to load/save')
-    parser.add_argument('-ne', metavar='number', type=int,
+    parser.add_argument('-epochs', metavar='number', type=int,
                         help='number of epochs for training')
-    parser.add_argument('m', metavar='modes', nargs='+', 
-                        help='modes: dataset, train, segment')
+    parser.add_argument('-psize', metavar='number', type=int, 
+                        help='segmentation patch size')
+    parser.add_argument('m', metavar='mode',
+                        help='modes: download, split, train, segment')
     parser.add_argument('df', metavar='folder', help='directory of the dataset')
     args = parser.parse_args()
-    # check modes
-    dataset = False
-    train = False
-    segment = False
-    if(len(args.m) > 3):
-        raise ValueError("there must be between 1 and 3 different modes")
-    for mode in args.m:
-        if(mode == 'dataset'):
-            if(args.dd is None):
-                raise ValueError("must provide a dataset descriptor")
-            if(not dataset):
-                dataset = True
-            else:
-                raise ValueError("duplicate of the mode 'dataset'")
-        elif(mode == 'train'):
-            if(not train):
-                train = True
-            else:
-                raise ValueError("duplicate of the mode 'train'")
-        elif(mode == 'segment'):
-            if(not segment):
-                segment = True
-            else:
-                raise ValueError("duplicate of the mode 'segment'")
-        else:
-            raise ValueError("unknown mode '" + mode + "'")
-    # run selected modes
-    if(dataset):
-        download_dataset(args.dd, args.df)
-    if(train or segment):
+    # check mode
+    modes = ['download', 'split', 'train', 'segment']
+    if modes.__contains__(args.m) == False:
+        raise ValueError("unknown mode '" + args.m + "'")        
+    # run selected mode
+    if args.m == 'download':
+        if args.desc is None:
+            raise ValueError("must provide a dataset descriptor")
+        download_dataset(args.desc, args.df)
+    if args.m == 'split':
+        split_dataset(args.df)
+    if args.m == 'train':
         segmenter = UnetSegmenter()
-        if(train):
-            if args.ne:
-                segmenter.train(ImgSet(args.df, 'train'), args.ne)
-            else:
-                segmenter.train(ImgSet(args.df, 'train'), 3)
-            if args.mf:
-                segmenter.save_model(args.mf)
-        if(segment):
-            if args.mf:
-                segmenter.load_model(args.mf)
-            segmenter.segment(ImgSet(args.df, 'test'))
+        if args.epochs:
+            segmenter.train(ImgSet(args.df), args.epochs)
+        else:
+            segmenter.train(ImgSet(args.df), 3)
+        if args.model:
+            segmenter.save_model(args.model)
+    if args.m == 'segment':
+        segmenter = UnetSegmenter()
+        if args.model:
+            segmenter.load_model(args.model)
+        if args.psize:
+            segmenter.segment(ImgSet(args.df), args.psize)
+        else:
+            segmenter.segment(ImgSet(args.df))

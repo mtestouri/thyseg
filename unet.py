@@ -39,7 +39,7 @@ class UnetSegmenter(Segmenter):
     def train(self, dataset, num_epochs):
         print("training the model..")
         if num_epochs < 1:
-            raise ValueError("'num_epochs' must be greater than 0")
+            raise ValueError("the number of epochs must be greater than 0")
         # training parameters
         batch_size = 1
         learning_rate = 0.0001
@@ -157,5 +157,5 @@ class UpConvBlock(nn.Module):
 
     def forward(self, x, skip_x):
         x = self.up(x)
-        x = torch.cat([x, skip_x], dim=1)
+        x = torch.cat([x, skip_x], dim=1) #TODO might need to crop
         return F.relu(self.conv2(F.relu(self.conv1(x))))

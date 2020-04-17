@@ -2,8 +2,10 @@
 tfe/
 __pycache__/
 d_*/
+d
 *.txt
 *.csv
 *.pth
-segmentations/
+segmentations*/
 *.tar.gz
+*.json
