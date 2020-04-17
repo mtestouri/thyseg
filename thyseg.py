@@ -11,9 +11,9 @@ if __name__ == "__main__":
                         help='filename of the dataset descriptor')
     parser.add_argument('-imhw', metavar='number', type=int,
                         help='image height and width')
-    parser.add_argument('-seed', metavar='number', type=int, help='seed value')
     parser.add_argument('-split', metavar='number', type=float,
                         help='split value')
+    parser.add_argument('-seed', metavar='number', type=int, help='seed value')
     parser.add_argument('-model', metavar='filename', 
                         help='filename of the model to load/save')
     parser.add_argument('-epochs', metavar='number', type=int,
@@ -32,22 +32,32 @@ if __name__ == "__main__":
     if args.m == 'download':
         if args.desc is None:
             raise ValueError("must provide a dataset descriptor")
-        download_dataset(args.desc, args.df)
+        if args.imhw is not None:
+            download_dataset(args.desc, args.df, args.imhw)
+        else:
+            download_dataset(args.desc, args.df)
     if args.m == 'split':
-        split_dataset(args.df)
+        if (args.split is not None) and (args.seed is not None):
+            split_dataset(args.df, args.split, args.seed)
+        elif args.split is not None:
+            split_dataset(args.df, args.split)
+        elif args.seed is not None:
+            split_dataset(args.df, seed=args.seed)
+        else:
+            split_dataset(args.df)
     if args.m == 'train':
         segmenter = UnetSegmenter()
-        if args.epochs:
+        if args.epochs is not None:
             segmenter.train(ImgSet(args.df), args.epochs)
         else:
             segmenter.train(ImgSet(args.df), 3)
-        if args.model:
+        if args.model is not None:
             segmenter.save_model(args.model)
     if args.m == 'segment':
         segmenter = UnetSegmenter()
-        if args.model:
+        if args.model is not None:
             segmenter.load_model(args.model)
-        if args.psize:
+        if args.psize is not None:
             segmenter.segment(ImgSet(args.df), args.psize)
         else:
             segmenter.segment(ImgSet(args.df))

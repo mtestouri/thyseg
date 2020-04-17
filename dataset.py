@@ -55,9 +55,11 @@ def download_dataset(filename, folder, imhw=512):
 
 from shutil import copyfile
 
-def split_dataset(folder, split=0.8, seed=42):
+def split_dataset(folder, split=0.8, seed=None):
     #TODO validation set
     print("splitting dataset..")
+    if (split < 0) or (split > 1):
+        raise ValueError("split must be between 0 and 1")
     while folder[-1] == '/':
         folder = folder[:len(folder)-1]
     # load list of files
@@ -65,7 +67,10 @@ def split_dataset(folder, split=0.8, seed=42):
     if len(files) == 0:
         raise FileNotFoundError("no files found in folder '" + folder + "'")
     # shuffle the files
-    random.Random(seed).shuffle(files)
+    if seed is not None:
+        random.Random(seed).shuffle(files)
+    else:
+        random.shuffle(files)
     train_files = files[:round(split*len(files))]
     test_files = files[round(split*len(files)):]
     # create train folder
