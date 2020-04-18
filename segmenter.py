@@ -25,51 +25,48 @@ class Segmenter:
     def train(self, dataset, num_epochs):
         raise NotImplementedError
 
-    def segment(self, dataset, patch_size=None):
+    def segment(self, dataset, psize=None):
         print("segmenting..")
+        psize_given = (psize is not None)
+        if psize_given:
+            if psize < 1:
+                raise ValueError("the patch size must be greater than 0")
+            else:
+                psize_h = psize
+                psize_w = psize
         # create folder
         if not os.path.exists('segmentations'):
             os.makedirs('segmentations')
-        # used to rebuild the images
-        (x, _) = dataset[0]
-        im_h = x.shape[1]
-        im_w = x.shape[2]
-        if patch_size is None:
-            patch_size = im_h
-        if patch_size < 1:
-            raise ValueError("the patch size must be greater than 0")
-        if (im_h % patch_size) != 0 or (im_w % patch_size) != 0:
-            raise ValueError("the patch size must divide the image dimensions")
-        z = np.zeros((im_h, im_w, 1), dtype=np.uint8)
-        sep = np.ones((im_h, 10, 3), dtype=np.uint8)*255
         # compute segmentations
         data_loader = DataLoader(dataset=dataset, batch_size=1, num_workers=2)
         for i, (x, y) in enumerate(data_loader):
+            im_h = x.shape[2]
+            im_w = x.shape[3]
+            if not psize_given:
+                psize_h = im_h
+                psize_w = im_w
+            if (im_h % psize_h) != 0 or (im_w % psize_w) != 0:
+                raise ValueError("the patch size must divide the image dimensions")
+            # used to rebuild the image
+            z = np.zeros((im_h, im_w, 1), dtype=np.uint8)
+            sep = np.ones((im_h, 10, 3), dtype=np.uint8)*255
             y_pred = np.zeros((im_h, im_w, 2), dtype=np.float32)
+            # compute mask using a sliding patch
             i_h = 0
-            for j in range(x.shape[2] // patch_size):
+            for j in range(x.shape[2] // psize_h):
                 i_w = 0
-                for k in range(x.shape[3] // patch_size):
+                for k in range(x.shape[3] // psize_w):
                     # extract patch
-                    patch = x[:, :, i_h:(i_h+patch_size), i_w:(i_w+patch_size)]
+                    patch = x[:, :, i_h:(i_h+psize_h), i_w:(i_w+psize_w)]
                     # compute mask
                     with torch.no_grad():
                         patch = patch.to(self.device)
                         p_y_pred = torch.sigmoid(self.model(patch))
                         p_y_pred = p_y_pred.permute(0, 2, 3, 1).squeeze(0).cpu().numpy()
-                        # debug
-                        #import matplotlib.pyplot as plt
-                        #plt.imshow(patch.permute(0, 2, 3, 1).cpu().squeeze(0).int())
-                        #plt.show()
-                        #c = np.int32(p_y_pred[:, :, 1].reshape(128, 128, 1)*180)
-                        #a = np.zeros((128, 128, 1), dtype=np.uint8)
-                        #c = np.concatenate((a, c, a), axis=2)
-                        #plt.imshow(c)
-                        #plt.show()
                     # write patch
-                    y_pred[i_h:(i_h+patch_size), i_w:(i_w+patch_size)] = p_y_pred
-                    i_w += patch_size
-                i_h += patch_size
+                    y_pred[i_h:(i_h+psize_h), i_w:(i_w+psize_w)] = p_y_pred
+                    i_w += psize_w
+                i_h += psize_h
             # convert tensors to numpy
             x = x.permute(0, 2, 3, 1).squeeze(0).cpu().numpy()
             y = y.permute(0, 2, 3, 1).squeeze(0).numpy()

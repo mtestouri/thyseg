@@ -10,6 +10,7 @@ import torch
 from torch.utils.data import Dataset
 from glob import glob
 import random
+from shutil import copyfile
 import cv2
 
 def download_dataset(filename, folder, imhw=512):
@@ -52,8 +53,6 @@ def download_dataset(filename, folder, imhw=512):
             print(f'progress: {round(i/len(array)*100, 1)}%')
             i += 1
     print("dataset downloaded")
-
-from shutil import copyfile
 
 def split_dataset(folder, split=0.8, seed=None):
     #TODO validation set
@@ -100,8 +99,6 @@ class ImgSet(Dataset):
         self.files = glob(self.df + "/*_x.jpg")
         if len(self.files) == 0:
             raise FileNotFoundError("no files found in folder '" + self.df + "'")
-        # retrieve image height and width
-        self.imhw = cv2.imread(self.files[0]).shape[0]
         
     def __getitem__(self, index):
         # load image files
@@ -111,9 +108,6 @@ class ImgSet(Dataset):
         y = cv2.imread(y_file)
         if y is None: #TODO investigate why this happens
             raise FileNotFoundError("unable to load '" + y_file + "'")
-        if np.shape(x) != (self.imhw, self.imhw, 3):
-            x = cv2.resize(x, (self.imhw, self.imhw), interpolation=cv2.INTER_LINEAR)
-            y = cv2.resize(y, (self.imhw, self.imhw), interpolation=cv2.INTER_LINEAR)
         # RGB masks to classe masks
         y = np.abs(np.round(y/255)[:, :, :2] - (1, 0))
         # convert to tensors
