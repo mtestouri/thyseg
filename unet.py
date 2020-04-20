@@ -7,6 +7,7 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 import math
 import numpy as np
+import cv2
 
 def dice_loss(y_pred, y):
     smooth = 1.
@@ -59,6 +60,8 @@ class UnetSegmenter(Segmenter):
                 y = y.to(self.device)
                 # forward pass
                 y_pred = self.model(x)
+                if y_pred.shape != y.shape:
+                    y = self.resize(y, (y_pred.shape[2], y_pred.shape[3]))
                 loss = criterion(y_pred, y)
                 sum_loss += loss.item()
                 sum_dice += dice_loss(y_pred, y).item() # compute dice loss
@@ -74,6 +77,18 @@ class UnetSegmenter(Segmenter):
                       + ", avg_loss: " + str(round(sum_loss/(i + 1), 4))
                       + ", avg_dice_loss: " + str(round(sum_dice/(i + 1), 4)))
         print("training done")
+
+    def resize(self, t, size):
+        # convert to numpy image and resize
+        t = t[:, 1, :, :].cpu().squeeze(0).reshape(t.shape[2], t.shape[3], 1)
+        t = torch.cat([t, t, t], dim=2)
+        t = torch.round(t*255)
+        t = t.numpy()
+        t = cv2.resize(t, (size[1], size[0])) # h and w are inverted in cv2
+        # convert back to tensor of classes
+        t = np.abs(np.round(t/255)[:, :, :2] - (1, 0))
+        t = torch.from_numpy(t).permute(2, 0, 1).reshape(1, 2, size[0], size[1])
+        return t.to(self.device)
 
 class Unet(nn.Module):
     def __init__(self, init_depth=32, n_classes=2):
@@ -157,5 +172,7 @@ class UpConvBlock(nn.Module):
 
     def forward(self, x, skip_x):
         x = self.up(x)
-        x = torch.cat([x, skip_x], dim=1) #TODO might need to crop
+        if x.shape!= skip_x.shape:
+            skip_x = skip_x[:, :, :x.shape[2], :x.shape[3]] # crop if necessary
+        x = torch.cat([x, skip_x], dim=1)
         return F.relu(self.conv2(F.relu(self.conv1(x))))

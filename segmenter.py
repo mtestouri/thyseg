@@ -25,7 +25,11 @@ class Segmenter:
     def train(self, dataset, num_epochs):
         raise NotImplementedError
 
-    def segment(self, dataset, psize=None):
+    def predict(self, image):
+        with torch.no_grad():
+            return torch.sigmoid(self.model(image.to(self.device)))
+
+    def segment(self, dataset, psize=None, assess=False):
         print("segmenting..")
         psize_given = (psize is not None)
         if psize_given:
@@ -47,48 +51,59 @@ class Segmenter:
                 psize_w = im_w
             if (im_h % psize_h) != 0 or (im_w % psize_w) != 0:
                 raise ValueError("the patch size must divide the image dimensions")
-            # used to rebuild the image
-            z = np.zeros((im_h, im_w, 1), dtype=np.uint8)
-            sep = np.ones((im_h, 10, 3), dtype=np.uint8)*255
-            y_pred = np.zeros((im_h, im_w, 2), dtype=np.float32)
             # compute mask using a sliding patch
+            y_pred = np.zeros((im_h, im_w, 3), dtype=np.float32)
             i_h = 0
             for j in range(x.shape[2] // psize_h):
                 i_w = 0
                 for k in range(x.shape[3] // psize_w):
                     # extract patch
                     patch = x[:, :, i_h:(i_h+psize_h), i_w:(i_w+psize_w)]
-                    # compute mask
-                    with torch.no_grad():
-                        patch = patch.to(self.device)
-                        p_y_pred = torch.sigmoid(self.model(patch))
-                        p_y_pred = p_y_pred.permute(0, 2, 3, 1).squeeze(0).cpu().numpy()
+                    # predict mask
+                    mask = self.predict(patch)
+                    mask = mask.permute(0, 2, 3, 1).squeeze(0).cpu().numpy()
+                    # recreate patch mask from classes
+                    m_h = mask.shape[0]
+                    m_w = mask.shape[1]
+                    mask = mask[:, :, 1].reshape(m_h, m_w, 1)
+                    if assess:
+                        z = np.zeros((m_h, m_w, 1), dtype=np.float32)
+                        mask = np.concatenate((z, mask, z), axis=2)*180
+                    else:
+                        mask = np.concatenate((mask, mask, mask), axis=2)*255
+                    # resize if necessary
+                    if mask.shape != (psize_h, psize_w):
+                        mask = cv2.resize(mask, (psize_w, psize_h))
                     # write patch
-                    y_pred[i_h:(i_h+psize_h), i_w:(i_w+psize_w)] = p_y_pred
+                    y_pred[i_h:(i_h+psize_h), i_w:(i_w+psize_w)] = mask
                     i_w += psize_w
                 i_h += psize_h
-            # convert tensors to numpy
-            x = x.permute(0, 2, 3, 1).squeeze(0).cpu().numpy()
-            y = y.permute(0, 2, 3, 1).squeeze(0).numpy()
-            # recreate image masks from classes
-            y = np.concatenate(
-                (z, y[:, :, 1].reshape(im_h, im_w, 1)*180, z), axis=2)
-            y_pred = np.concatenate(
-                (z, y_pred[:, :, 1].reshape(im_h, im_w, 1)*180, z), axis=2)
-            # combine masks and images
-            sup_y = x + y
-            sup_y_pred = x + y_pred
-            # add labels
-            cv2.putText(y, "man", (10, 30), fontScale=1, thickness=2, 
-                        fontFace=cv2.FONT_HERSHEY_SIMPLEX, color=(0, 0, 255))
-            cv2.putText(y_pred, "pred", (10, 30), fontScale=1, thickness=2,
-                        fontFace=cv2.FONT_HERSHEY_SIMPLEX, color=(0, 0, 255))
-            # write files
-            img = np.concatenate((x, sep,
-                                 sup_y, sep,
-                                 sup_y_pred, sep,
-                                 y, sep,
-                                 y_pred), axis=1)
+            # write the image file
+            if assess:
+                z = np.zeros((im_h, im_w, 1), dtype=np.float32)
+                sep = np.ones((im_h, 10, 3), dtype=np.float32)*255
+                # convert tensors to numpy
+                x = x.permute(0, 2, 3, 1).squeeze(0).cpu().numpy()
+                y = y.permute(0, 2, 3, 1).squeeze(0).numpy()
+                # recreate image mask from classes
+                y = y[:, :, 1].reshape(im_h, im_w, 1)*180
+                y = np.concatenate((z, y, z), axis=2)
+                # combine masks and images
+                sup_y = x + y
+                sup_y_pred = x + y_pred
+                # add labels
+                cv2.putText(y, "man", (10, 30), fontScale=1, thickness=2, 
+                            fontFace=cv2.FONT_HERSHEY_SIMPLEX, color=(0, 0, 255))
+                cv2.putText(y_pred, "pred", (10, 30), fontScale=1, thickness=2,
+                            fontFace=cv2.FONT_HERSHEY_SIMPLEX, color=(0, 0, 255))
+                # final image
+                img = np.concatenate((x, sep, 
+                                      sup_y, sep, 
+                                      sup_y_pred, sep, 
+                                      y, sep, 
+                                      y_pred), axis=1)
+            else:
+                img = y_pred # just the mask
             cv2.imwrite("segmentations/seg" + str(i) + ".jpg", img)
             print(f'segmentation: {i+1}/{len(dataset)}', end='\r')
         print("\nsegmentation done")

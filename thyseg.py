@@ -20,6 +20,8 @@ if __name__ == "__main__":
                         help='number of epochs for training')
     parser.add_argument('-psize', metavar='number', type=int, 
                         help='segmentation patch size')
+    parser.add_argument('-a', action='store_true',
+                        help='flag for model assessment')
     parser.add_argument('m', metavar='mode',
                         help='modes: download, split, train, segment')
     parser.add_argument('df', metavar='folder', help='directory of the dataset')
@@ -47,10 +49,9 @@ if __name__ == "__main__":
             split_dataset(args.df)
     if args.m == 'train':
         segmenter = UnetSegmenter()
-        if args.epochs is not None:
-            segmenter.train(ImgSet(args.df), args.epochs)
-        else:
-            segmenter.train(ImgSet(args.df), 3)
+        if args.epochs is None:
+            args.epochs = 3
+        segmenter.train(ImgSet(args.df), args.epochs)
         if args.model is not None:
             segmenter.save_model(args.model)
     if args.m == 'segment':
@@ -58,6 +59,6 @@ if __name__ == "__main__":
         if args.model is not None:
             segmenter.load_model(args.model)
         if args.psize is not None:
-            segmenter.segment(ImgSet(args.df), args.psize)
+            segmenter.segment(ImgSet(args.df), args.psize, args.a)
         else:
-            segmenter.segment(ImgSet(args.df))
+            segmenter.segment(ImgSet(args.df), assess=args.a)
