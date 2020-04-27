@@ -55,7 +55,6 @@ def download_dataset(filename, folder, imhw=512):
     print("dataset downloaded")
 
 def split_dataset(folder, split=0.8, seed=None):
-    #TODO validation set
     print("splitting dataset..")
     if (split < 0) or (split > 1):
         raise ValueError("split must be between 0 and 1")
@@ -90,6 +89,9 @@ def split_dataset(folder, split=0.8, seed=None):
         copyfile(y_file, test_f + "/" + y_file[len(folder)+1:])
     print("dataset split")
 
+def augment_dataset(folder):
+    raise NotImplementedError #TODO implement
+
 class ImgSet(Dataset):
     def __init__(self, folder):
         while folder[-1] == '/':
@@ -103,17 +105,18 @@ class ImgSet(Dataset):
     def __getitem__(self, index):
         # load image files
         x_file = self.files[index]
-        y_file = self.df + "/" + x_file[len(self.df)+1:len(x_file)-6] + "_y.jpg"
+        file_id = x_file[len(self.df)+1:len(x_file)-6]
+        y_file = self.df + "/" + file_id + "_y.jpg"
         x = cv2.imread(x_file)
         y = cv2.imread(y_file)
-        if y is None: #TODO investigate why this happens
+        if y is None:
             raise FileNotFoundError("unable to load '" + y_file + "'")
         # RGB masks to classe masks
         y = np.abs(np.round(y/255)[:, :, :2] - (1, 0))
         # convert to tensors
         x = torch.from_numpy(x).float().permute(2, 0, 1)
         y = torch.from_numpy(y).float().permute(2, 0, 1)
-        return x, y
+        return x, y, file_id
 
     def __len__(self):
         return len(self.files)

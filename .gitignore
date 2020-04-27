@@ -1,8 +1,7 @@
 .vscode/
 tfe/
 __pycache__/
-d_*/
-d
+d*/
 *.txt
 *.csv
 *.pth

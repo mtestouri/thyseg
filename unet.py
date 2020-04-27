@@ -37,9 +37,9 @@ class UnetSegmenter(Segmenter):
     def init_model(self):
         return Unet()
 
-    def train(self, dataset, num_epochs):
+    def train(self, dataset, n_epochs):
         print("training the model..")
-        if num_epochs < 1:
+        if n_epochs < 1:
             raise ValueError("the number of epochs must be greater than 0")
         # training parameters
         batch_size = 1
@@ -47,14 +47,15 @@ class UnetSegmenter(Segmenter):
         criterion = SegLoss() # custom loss
         optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
         # train loop
+        self.model.train()
         data_loader = DataLoader(dataset=dataset, batch_size=batch_size,
                                  num_workers=2)
         n_iterations = math.ceil(len(dataset)/batch_size)
-        for epoch in range(num_epochs):
+        for epoch in range(n_epochs):
             print('')
             sum_loss = 0
             sum_dice = 0
-            for i, (x, y) in enumerate(data_loader):
+            for i, (x, y, _) in enumerate(data_loader):
                 # batch
                 x = x.to(self.device)
                 y = y.to(self.device)
@@ -72,7 +73,7 @@ class UnetSegmenter(Segmenter):
                 # verbose
                 sys.stdout.write("\033[F") # move cursor up
                 sys.stdout.write("\033[K") # clear line
-                print("epoch: " + str(epoch+1) + "/" + str(num_epochs)
+                print("epoch: " + str(epoch+1) + "/" + str(n_epochs)
                       + ", step: " + str(i+1) + "/" + str(n_iterations)
                       + ", avg_loss: " + str(round(sum_loss/(i + 1), 4))
                       + ", avg_dice_loss: " + str(round(sum_dice/(i + 1), 4)))
