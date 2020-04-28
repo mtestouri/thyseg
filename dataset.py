@@ -101,6 +101,12 @@ class ImgSet(Dataset):
         self.files = glob(self.df + "/*_x.jpg")
         if len(self.files) == 0:
             raise FileNotFoundError("no files found in folder '" + self.df + "'")
+        # define dataset image size
+        self.im_h = None
+        self.im_w = None
+        (x, _, _) = self.__getitem__(0)
+        self.im_h = x.shape[1]
+        self.im_w = x.shape[2]
         
     def __getitem__(self, index):
         # load image files
@@ -111,6 +117,12 @@ class ImgSet(Dataset):
         y = cv2.imread(y_file)
         if y is None:
             raise FileNotFoundError("unable to load '" + y_file + "'")
+        # check size
+        if (self.im_h is not None) and (self.im_w is not None):
+            if (x.shape[0] != self.im_h) or (x.shape[1] != self.im_w):
+                x = cv2.resize(x, (self.im_w, self.im_h), cv2.INTER_LINEAR)
+            if (y.shape[0] != self.im_h) or (y.shape[1] != self.im_w):
+                y = cv2.resize(y, (self.im_w, self.im_h), cv2.INTER_LINEAR) 
         # RGB masks to classe masks
         y = np.abs(np.round(y/255)[:, :, :2] - (1, 0))
         # convert to tensors

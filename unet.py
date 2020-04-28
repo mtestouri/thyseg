@@ -48,14 +48,13 @@ class UnetSegmenter(Segmenter):
         optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
         # train loop
         self.model.train()
-        data_loader = DataLoader(dataset=dataset, batch_size=batch_size,
-                                 num_workers=2)
+        dl = DataLoader(dataset=dataset, batch_size=batch_size, num_workers=2)
         n_iterations = math.ceil(len(dataset)/batch_size)
         for epoch in range(n_epochs):
             print('')
             sum_loss = 0
             sum_dice = 0
-            for i, (x, y, _) in enumerate(data_loader):
+            for i, (x, y, _) in enumerate(dl):
                 # batch
                 x = x.to(self.device)
                 y = y.to(self.device)

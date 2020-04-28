@@ -9,23 +9,27 @@ if __name__ == "__main__":
                                      + 'of the thyroid.')
     parser.add_argument('-desc', metavar='filename', 
                         help='filename of the dataset descriptor')
-    parser.add_argument('-imhw', metavar='number', type=int,
+    parser.add_argument('-imhw', metavar='value', type=int,
                         help='image height and width')
-    parser.add_argument('-split', metavar='number', type=float,
+    parser.add_argument('-split', metavar='value', type=float,
                         help='split value')
-    parser.add_argument('-seed', metavar='number', type=int, help='seed value')
+    parser.add_argument('-seed', metavar='value', type=int, help='seed value')
     parser.add_argument('-load', metavar='filename', 
                         help='filename of the model to load')
     parser.add_argument('-save', metavar='filename', 
                         help='filename of the model to save')
     parser.add_argument('-epochs', metavar='number', type=int,
                         help='number of epochs for training')
-    parser.add_argument('-psize', metavar='number', type=int, 
+    parser.add_argument('-psize', metavar='value', type=int, 
                         help='segmentation patch size')
     parser.add_argument('-a', action='store_true',
                         help='flag for model assessment')
     parser.add_argument('-iters', metavar='number', type=int,
                         help='number of iterations for the improve mode')
+    parser.add_argument('-blur', metavar='value', type=int,
+                        help='blur kernel size')
+    parser.add_argument('-thresh', metavar='value', type=float,
+                        help='mask threshold value')
     parser.add_argument('m', metavar='mode',
                 help='modes: download, split, augment, improve, train, segment')
     parser.add_argument('df', metavar='folder', help='directory of the dataset')
@@ -71,7 +75,17 @@ if __name__ == "__main__":
             segmenter = UnetSegmenter()
             if args.load is not None:
                 segmenter.load_model(args.load)
-            segmenter.iter_data_imp(args.df, args.iters, args.epochs)
+            if (args.blur is not None) and (args.thresh is not None):
+                segmenter.iter_data_imp(args.df, args.iters, args.epochs, 
+                                        args.blur, args.thresh)
+            elif args.blur is not None:
+                segmenter.iter_data_imp(args.df, args.iters, args.epochs,
+                                        blur_ks=args.blur)
+            elif args.thresh is not None:
+                segmenter.iter_data_imp(args.df, args.iters, args.epochs, 
+                                        thresh=args.thresh)
+            else:
+                segmenter.iter_data_imp(args.df, args.iters, args.epochs)
             if args.save is not None:
                 segmenter.save_model(args.save)
         else:
