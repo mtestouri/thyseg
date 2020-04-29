@@ -109,7 +109,7 @@ def augment_dataset(folder):
     ], random_order=True)
 
     for x_file in x_files:
-        #load images
+        # load images
         file_id = x_file[len(folder)+1:len(x_file)-6]
         y_file = folder + "/" + file_id + "_y.jpg"
         x = cv2.imread(x_file)
