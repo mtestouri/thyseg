@@ -12,6 +12,8 @@ from glob import glob
 import random
 from shutil import copyfile
 import cv2
+from imgaug import augmenters as iaa
+from imgaug.augmentables.segmaps import SegmentationMapsOnImage
 
 def download_dataset(filename, folder, imhw=512):
     # hide logging
@@ -90,7 +92,39 @@ def split_dataset(folder, split=0.8, seed=None):
     print("dataset split")
 
 def augment_dataset(folder):
-    raise NotImplementedError #TODO implement
+    print("augmenting dataset..")
+    # load list of files
+    while folder[-1] == '/':
+        folder = folder[:len(folder)-1]
+    x_files = glob(folder + "/*_x.jpg")
+    if len(x_files) == 0:
+        raise FileNotFoundError("no files found in folder '" + folder + "'")
+    # define transforms
+    tf = iaa.Sequential([
+        iaa.Fliplr(0.5),
+        iaa.Flipud(0.5),
+        iaa.TranslateX(percent=(-0.15, 0.15)),
+        iaa.TranslateY(percent=(-0.15, 0.15)),
+        iaa.Rot90((1, 4))
+    ], random_order=True)
+
+    for x_file in x_files:
+        #load images
+        file_id = x_file[len(folder)+1:len(x_file)-6]
+        y_file = folder + "/" + file_id + "_y.jpg"
+        x = cv2.imread(x_file)
+        y = cv2.imread(y_file)
+        if y is None:
+            raise FileNotFoundError("unable to load '" + y_file + "'")
+        if y.shape != x.shape:
+            y = cv2.resize(y, (x.shape[1], x.shape[0]), cv2.INTER_LINEAR)
+        # apply transforms
+        y = SegmentationMapsOnImage(y, shape=x.shape)
+        x, y = tf(image=x, segmentation_maps=y)
+        # write files
+        cv2.imwrite(folder + "/" + file_id + "a_x.jpg", x)
+        cv2.imwrite(folder + "/" + file_id + "a_y.jpg", y.get_arr())
+    print("dataset augmented")
 
 class ImgSet(Dataset):
     def __init__(self, folder):
