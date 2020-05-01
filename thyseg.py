@@ -1,5 +1,6 @@
 import argparse 
-from dataset import download_dataset, split_dataset, augment_dataset, ImgSet
+from dataset import download_dataset, draw_borders, split_dataset
+from dataset import augment_dataset, ImgSet
 from unet import UnetSegmenter
 
 if __name__ == "__main__":
@@ -31,7 +32,8 @@ if __name__ == "__main__":
     parser.add_argument('-thresh', metavar='value', type=float,
                         help='mask threshold value')
     parser.add_argument('m', metavar='mode',
-                help='modes: download, split, augment, improve, train, segment')
+                        help='modes: download, borders, split,'
+                             + ' augment, improve, train, segment')
     parser.add_argument('df', metavar='folder', help='directory of the dataset')
     args = parser.parse_args()
     # run selected mode
@@ -42,6 +44,8 @@ if __name__ == "__main__":
             download_dataset(args.desc, args.df, args.imhw)
         else:
             download_dataset(args.desc, args.df)
+    elif args.m == 'borders':
+        draw_borders(args.df)
     elif args.m == 'split':
         if (args.split is not None) and (args.seed is not None):
             split_dataset(args.df, args.split, args.seed)

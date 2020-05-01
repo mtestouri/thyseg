@@ -126,6 +126,37 @@ def augment_dataset(folder):
         cv2.imwrite(folder + "/" + file_id + "a_y.jpg", y.get_arr())
     print("dataset augmented")
 
+def draw_borders(folder):
+    print("drawing borders..")
+    # load list of files
+    while folder[-1] == '/':
+        folder = folder[:len(folder)-1]
+    x_files = glob(folder + "/*_x.jpg")
+    if len(x_files) == 0:
+        raise FileNotFoundError("no files found in folder '" + folder + "'")
+    # create folder
+    folder_b = folder + "_b"
+    if not os.path.exists(folder_b):
+        os.makedirs(folder_b)
+    # add borders
+    for x_file in x_files:
+        # load files
+        file_id = x_file[len(folder)+1:len(x_file)-6]
+        y_file = folder + "/" + file_id + "_y.jpg"
+        x = cv2.imread(x_file)
+        y = cv2.imread(y_file)
+        if y is None:
+            raise FileNotFoundError("unable to load '" + y_file + "'")
+        # compute borders
+        kernel = np.ones((5, 5), np.uint8)
+        erosion = cv2.erode(y, kernel, iterations = 2)
+        borders = (y - erosion)*(1, 1, 0)
+        y = y - borders
+        # write files
+        cv2.imwrite(folder_b + "/" + file_id + "_x.jpg", x)
+        cv2.imwrite(folder_b + "/" + file_id + "_y.jpg", y)
+    print("borders drawn")
+
 class ImgSet(Dataset):
     def __init__(self, folder):
         while folder[-1] == '/':
