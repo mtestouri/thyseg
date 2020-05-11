@@ -1,5 +1,6 @@
 import sys
 from segmenter import Segmenter
+from metrics import dice
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -10,13 +11,7 @@ import numpy as np
 import cv2
 
 def dice_loss(y_pred, y):
-    smooth = 1.
-    y_pred = torch.sigmoid(y_pred).view(len(y_pred), -1)
-    y = y.view(len(y), -1)
-    intersection = torch.sum(y_pred * y)
-    sum_a = torch.sum(y_pred * y_pred)
-    sum_b = torch.sum(y * y)
-    return 1 - ((2. * intersection + smooth) / (sum_a + sum_b + smooth))
+    return 1 - dice(y_pred, y)
 
 class SegLoss(nn.Module):
     def __init__(self, mode='both'):
@@ -34,8 +29,14 @@ class SegLoss(nn.Module):
         return self.bce_loss(y_pred, y) + dice_loss(y_pred, y)
 
 class UnetSegmenter(Segmenter):
+    def __init__(self, init_depth=32):
+        if init_depth < 1:
+            raise ValueError("initial depth must be greater than 0")
+        self.init_depth = init_depth
+        super().__init__()
+
     def init_model(self):
-        return Unet()
+        return Unet(self.init_depth, n_classes=2)
 
     def train(self, dataset, n_epochs):
         print("training the model..")
@@ -91,7 +92,7 @@ class UnetSegmenter(Segmenter):
         return t.to(self.device)
 
 class Unet(nn.Module):
-    def __init__(self, init_depth=32, n_classes=2):
+    def __init__(self, init_depth, n_classes):
         super().__init__()
         # encoder
         in_ch = 3

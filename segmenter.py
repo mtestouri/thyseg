@@ -1,12 +1,16 @@
 import os
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import Dataset, DataLoader
 import torch.nn as nn
 import numpy as np
 import cv2
 from glob import glob
 from shutil import copyfile
-from dataset import ImgSet
+from metrics import dice, jaccard
+
+# TODO assessment with metrics
+# TODO sep post-processing instead of thresh and blur_ks
+# TODO union instead of replace in idi
 
 class Segmenter:
     def __init__(self):
@@ -78,7 +82,7 @@ class Segmenter:
                         if norm:
                             mask = (mask - np.mean(mask))/np.std(mask)
                         if blur_ks is not None:
-                            if blur_ks < 0:
+                            if blur_ks < 1:
                                 raise ValueError("blur size must be greater than 0")
                             mask = cv2.blur(mask, (blur_ks, blur_ks))
                         if thresh is not None:
@@ -136,7 +140,7 @@ class Segmenter:
                 print(f'segmentation: {count}/{len(dataset)}', end='\r')
         print("\nsegmentation done")
 
-    def iter_data_imp(self, folder, n_iters, n_epochs, blur_ks=5, thresh=0.5):
+    def iter_data_imp(self, folder, n_iters, n_epochs, thresh=0.5, blur_ks=5):
         # load the file list
         while folder[-1] == '/':
             folder = folder[:len(folder)-1]
@@ -157,3 +161,44 @@ class Segmenter:
             self.train(ImgSet(dest), n_epochs)
             self.segment(ImgSet(dest), dest=dest, norm=True, blur_ks=blur_ks,
                          thresh=thresh)
+
+class ImgSet(Dataset):
+    def __init__(self, folder):
+        while folder[-1] == '/':
+            folder = folder[:len(folder)-1]
+        self.df = folder
+        # load list of files
+        self.files = glob(self.df + "/*_x.jpg")
+        if len(self.files) == 0:
+            raise FileNotFoundError("no files found in folder '" + self.df + "'")
+        # define dataset image size
+        self.im_h = None
+        self.im_w = None
+        (x, _, _) = self.__getitem__(0)
+        self.im_h = x.shape[1]
+        self.im_w = x.shape[2]
+        
+    def __getitem__(self, index):
+        # load image files
+        x_file = self.files[index]
+        file_id = x_file[len(self.df)+1:len(x_file)-6]
+        y_file = self.df + "/" + file_id + "_y.jpg"
+        x = cv2.imread(x_file)
+        y = cv2.imread(y_file)
+        if y is None:
+            raise FileNotFoundError("unable to load '" + y_file + "'")
+        # check size
+        if (self.im_h is not None) and (self.im_w is not None):
+            if (x.shape[0] != self.im_h) or (x.shape[1] != self.im_w):
+                x = cv2.resize(x, (self.im_w, self.im_h), cv2.INTER_LINEAR)
+            if (y.shape[0] != self.im_h) or (y.shape[1] != self.im_w):
+                y = cv2.resize(y, (self.im_w, self.im_h), cv2.INTER_LINEAR) 
+        # RGB masks to classe masks
+        y = np.abs(np.round(y/255)[:, :, :2] - (1, 0))
+        # convert to tensors
+        x = torch.from_numpy(x).float().permute(2, 0, 1)
+        y = torch.from_numpy(y).float().permute(2, 0, 1)
+        return x, y, file_id
+
+    def __len__(self):
+        return len(self.files)
