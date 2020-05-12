@@ -6,7 +6,7 @@ import json
 import pandas as pd
 import numpy as np
 from cytomine import Cytomine
-from cytomine.models import ImageInstance, Annotation
+from cytomine.models import ImageInstance, Annotation, AnnotationCollection
 from glob import glob
 import random
 from shutil import copyfile
@@ -14,6 +14,7 @@ import cv2
 from imgaug import augmenters as iaa
 from imgaug.augmentables.segmaps import SegmentationMapsOnImage
 from shapely.geometry import box
+import shapely.wkt
 
 def add_roi(id_project, id_image, hw=2048):
     if hw < 1:
@@ -28,48 +29,87 @@ def add_roi(id_project, id_image, hw=2048):
                                 id_image=id_image)
         annotation.save()
 
-def download_dataset(filename, folder, imhw=512): #TODO download from ROI
+def download_from_json(filename, folder, imhw):
+    print("downloading dataset..")
+    desc = json.load(open(filename))
+    i = 1
+    for image_id in desc['images']:
+        # fetch WSI
+        image = ImageInstance()
+        image.id = image_id
+        image.fetch()
+        # fetch ROIs
+        rois = AnnotationCollection()
+        rois.user = desc['user']
+        rois.project = desc['project']
+        rois.term = desc['roi']
+        rois.image = image_id
+        rois.fetch()
+        for roi in rois:
+            roi.fetch()
+            # compute upper left coordinates
+            p = shapely.wkt.loads(roi.location)
+            ul_x, ul_y = list(p.exterior.coords)[2]
+            ul_x = int(ul_x)
+            ul_y = int(image.height - ul_y)
+            # download ROI and corresponding mask
+            slice_image = image.reference_slice()
+            slice_image.window(ul_x, ul_y, imhw, imhw, dest_pattern=folder
+                               + "/" + str(i) + "_x.jpg")
+            slice_image.window(ul_x, ul_y, imhw, imhw, dest_pattern=folder 
+                               + "/" + str(i) + "_y.jpg",
+                               mask=True,
+                               terms=[desc['foreground']])
+            i += 1
+    print("dataset downloaded")
+
+def download_from_csv(filename, folder, imhw):
+    print("downloading dataset..")
+    array = pd.read_csv(filename, sep=';').to_numpy()
+    i = 1
+    for row in array:
+        annotation = Annotation()
+        annotation.id = int(row[0])
+        annotation.fetch()
+        image = ImageInstance()
+        image.id = int(row[5])
+        image.fetch()
+        # convert the coordinates
+        x = round(float(row[3])-(imhw/2))
+        y = image.height - round(float(row[4])+(imhw/2))
+        # download slice and corresponding mask
+        slice_image = image.reference_slice()
+        slice_image.window(x, y, imhw, imhw, dest_pattern=folder
+                           + "/" + str(i) + "_x.jpg")
+        slice_image.window(x, y, imhw, imhw, dest_pattern=folder 
+                           + "/" + str(i) + "_y.jpg",
+                           mask=True,
+                           terms=annotation.term)
+        if i > 1:
+            sys.stdout.write("\033[F")
+        sys.stdout.write("\033[K")
+        print(f'progress: {round(i/len(array)*100, 1)}%')
+        i += 1
+    print("dataset downloaded")
+
+def download_dataset(filename, folder, imhw=512):
     if imhw < 1:
         raise ValueError("the image height and width must be greater than 0")
     # hide logging
     logger = logging.getLogger()
     logger.disabled = True
-    print("downloading dataset..") 
+    # create folder
+    if not os.path.exists(folder):
+        os.makedirs(folder)
+
     cred = json.load(open('credentials.json'))
     with Cytomine(host=cred['host'], 
                   public_key=cred['public_key'], 
                   private_key=cred['private_key']) as conn:
-        # create folder
-        if not os.path.exists(folder):
-            os.makedirs(folder)
-        # dataset descriptor
-        array = pd.read_csv(filename, sep=';').to_numpy()
-        # download the images
-        i = 1
-        for row in array:
-            annotation = Annotation()
-            annotation.id = int(row[0])
-            annotation.fetch()
-            image = ImageInstance()
-            image.id = int(row[5])
-            image.fetch()
-            # convert the coordinates
-            x = round(float(row[3])-(imhw/2))
-            y = image.height - round(float(row[4])+(imhw/2))
-            # download slice and corresponding mask 
-            slice_image = image.reference_slice()
-            slice_image.window(x, y, imhw, imhw, dest_pattern=folder
-                               + "/" + str(i) + "_x.jpg")
-            slice_image.window(x, y, imhw, imhw, dest_pattern=folder 
-                               + "/" + str(i) + "_y.jpg",
-                               mask=True,
-                               terms=annotation.term)
-            if i > 1:
-                sys.stdout.write("\033[F")
-            sys.stdout.write("\033[K")
-            print(f'progress: {round(i/len(array)*100, 1)}%')
-            i += 1
-    print("dataset downloaded")
+        if ".csv" in filename:
+            download_from_csv(filename, folder, imhw)
+        if ".json" in filename:
+            download_from_json(filename, folder, imhw)
 
 def split_dataset(folder, split=0.8, seed=None):
     print("splitting dataset..")
