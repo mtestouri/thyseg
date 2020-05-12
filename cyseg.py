@@ -44,7 +44,7 @@ if __name__ == "__main__":
         if args.load is not None:
             segmenter.load_model(args.load)
         if args.psize is not None:
-            segmenter.segment(ImgSet(args.df), p_size=args.psize, 
+            segmenter.segment(ImgSet(args.df), psize=args.psize, 
                               thresh=args.thresh, assess=args.a)
         else:
             segmenter.segment(ImgSet(args.df), thresh=args.thresh, assess=args.a)

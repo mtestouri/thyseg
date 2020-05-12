@@ -11,4 +11,4 @@ def dice(y_pred, y):
 
 def jaccard(y_pred, y):
     d = dice(y_pred, y)
-    raise d / (2 - d)
+    return d / (2 - d)

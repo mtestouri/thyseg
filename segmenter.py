@@ -8,8 +8,9 @@ from glob import glob
 from shutil import copyfile
 from metrics import dice, jaccard
 
-# TODO assessment with metrics
 # TODO sep post-processing instead of thresh and blur_ks
+# TODO metrics after post-processing
+# TODO dice > 1 ??
 # TODO union instead of replace in idi
 
 class Segmenter:
@@ -53,6 +54,9 @@ class Segmenter:
         if not os.path.exists(dest):
             os.makedirs(dest)
         # compute segmentations
+        if assess:
+            sum_dice = 0
+            sum_jaccard = 0
         count = 0
         dl = DataLoader(dataset=dataset, batch_size=batch_size, num_workers=2)
         for i, (images, masks, files_id) in enumerate(dl):
@@ -72,8 +76,15 @@ class Segmenter:
                     patchs = images[:, :, i_h:(i_h+patch_h), i_w:(i_w+patch_w)]
                     # predict masks
                     preds = self.predict(patchs)
-                    preds = preds.permute(0, 2, 3, 1).cpu().numpy()
+                    # metrics
+                    if assess:
+                        for l in range(len(preds)):
+                            mask = masks[l, :, i_h:(i_h+patch_h), 
+                                         i_w:(i_w+patch_w)].to(self.device)
+                            sum_dice += dice(preds[l], mask).item()
+                            sum_jaccard = jaccard(preds[l], mask).item()
                     # recreate mask patchs from classes
+                    preds = preds.permute(0, 2, 3, 1).cpu().numpy()
                     m_h = preds[0].shape[0]
                     m_w = preds[0].shape[1]
                     for l in range(len(preds)):
@@ -137,7 +148,14 @@ class Segmenter:
                 else: # just the mask
                     cv2.imwrite(dest  + "/" + files_id[j] + "_y.jpg", mask_p)
                 count += 1
-                print(f'segmentation: {count}/{len(dataset)}', end='\r')
+                
+                if assess:
+                    print("segmentation: " + str(count) + "/" + str(len(dataset))
+                          + ", avg_dice: " + str(round(sum_dice/count, 4))
+                          + ", avg_jaccard: " + str(round(sum_jaccard/count, 4))
+                          , end='\r')
+                else:
+                    print(f'segmentation: {count}/{len(dataset)}', end='\r')
         print("\nsegmentation done")
 
     def iter_data_imp(self, folder, n_iters, n_epochs, thresh=0.5, blur_ks=5):
