@@ -9,7 +9,6 @@ from shutil import copyfile
 from metrics import dice, jaccard
 from transforms import Resize
 
-# TODO size 'man' et 'pred'
 # TODO union instead of replace in idi
 
 class Segmenter:
@@ -123,11 +122,6 @@ class Segmenter:
                     # combine masks and images
                     sup = image + mask
                     sup_p = image + mask_p
-                    # add labels
-                    cv2.putText(mask, "man", (10, 30), fontScale=1, thickness=2, 
-                            fontFace=cv2.FONT_HERSHEY_SIMPLEX, color=(0, 0, 255))
-                    cv2.putText(mask_p, "pred", (10, 30), fontScale=1, thickness=2,
-                            fontFace=cv2.FONT_HERSHEY_SIMPLEX, color=(0, 0, 255))
                     # write final image
                     sep = np.ones((im_h, 10, 3), dtype=np.float32)*255
                     img = np.concatenate((image, sep, 
