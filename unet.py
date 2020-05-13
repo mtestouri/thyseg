@@ -1,5 +1,6 @@
 import sys
 from segmenter import Segmenter
+from transforms import Resize, Threshold, Normalize, Smoothing
 from metrics import dice
 import torch
 import torch.nn as nn
@@ -7,8 +8,23 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torchvision import transforms
 import math
-import numpy as np
-import cv2
+
+SMOOTH_KS = 15 # smoothing kernel size
+
+def seg_postprocess(thresh=None):
+    if thresh is not None:
+        return transforms.Compose([
+                Smoothing(SMOOTH_KS),
+                Threshold(thresh)
+            ])
+    return None
+
+def idi_postprocess(thresh):
+    return transforms.Compose([
+            Normalize(),
+            Smoothing(SMOOTH_KS),
+            Threshold(thresh)
+        ])
 
 def dice_loss(y_pred, y):
     return 1 - dice(y_pred, y)
@@ -30,13 +46,10 @@ class SegLoss(nn.Module):
 
 class UnetSegmenter(Segmenter):
     def __init__(self, init_depth=32):
+        super().__init__()
         if init_depth < 1:
             raise ValueError("initial depth must be greater than 0")
-        self.init_depth = init_depth
-        super().__init__()
-
-    def init_model(self):
-        return Unet(self.init_depth, n_classes=2)
+        self.model = Unet(init_depth, n_classes=2).to(self.device)
 
     def train(self, dataset, n_epochs):
         print("training the model..")
@@ -49,6 +62,7 @@ class UnetSegmenter(Segmenter):
         optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
         # train loop
         self.model.train()
+        tf_resize = Resize()
         dl = DataLoader(dataset=dataset, batch_size=batch_size, num_workers=2)
         n_iterations = math.ceil(len(dataset)/batch_size)
         for epoch in range(n_epochs):
@@ -62,7 +76,8 @@ class UnetSegmenter(Segmenter):
                 # forward pass
                 y_pred = self.model(x)
                 if y_pred.shape != y.shape:
-                    y = self.resize(y, (y_pred.shape[2], y_pred.shape[3]))
+                    y = tf_resize(y.cpu(), (y_pred.shape[2], y_pred.shape[3]))
+                    y = y.to(self.device)
                 loss = criterion(y_pred, y)
                 sum_loss += loss.item()
                 sum_dice += dice_loss(y_pred, y).item() # compute dice loss
@@ -78,18 +93,6 @@ class UnetSegmenter(Segmenter):
                       + ", avg_loss: " + str(round(sum_loss/(i + 1), 4))
                       + ", avg_dice_loss: " + str(round(sum_dice/(i + 1), 4)))
         print("training done")
-
-    def resize(self, t, size):
-        # convert to numpy image and resize
-        t = t[:, 1, :, :].cpu().squeeze(0).reshape(t.shape[2], t.shape[3], 1)
-        t = torch.cat([t, t, t], dim=2)
-        t = torch.round(t*255)
-        t = t.numpy()
-        t = cv2.resize(t, (size[1], size[0])) # h and w are inverted in cv2
-        # convert back to tensor of classes
-        t = np.abs(np.round(t/255)[:, :, :2] - (1, 0))
-        t = torch.from_numpy(t).permute(2, 0, 1).reshape(1, 2, size[0], size[1])
-        return t.to(self.device)
 
 class Unet(nn.Module):
     def __init__(self, init_depth, n_classes):

@@ -7,10 +7,9 @@ import cv2
 from glob import glob
 from shutil import copyfile
 from metrics import dice, jaccard
+from transforms import Resize
 
-# TODO sep post-processing instead of thresh and blur_ks
-# TODO metrics after post-processing
-# TODO dice > 1 ??
+# TODO size 'man' et 'pred'
 # TODO union instead of replace in idi
 
 class Segmenter:
@@ -19,27 +18,37 @@ class Segmenter:
             self.device = torch.device('cuda')
         else:
             self.device = torch.device('cpu')
-        self.model = self.init_model().to(self.device)
+        self.model = None
 
-    def init_model(self):
-        raise NotImplementedError
+    def check_model_init(self):
+        if self.model is None:
+            raise ValueError("variable 'self.model' not initialized")
 
     def save_model(self, model_file):
+        self.check_model_init()
         torch.save(self.model.state_dict(), model_file)
 
     def load_model(self, model_file):
+        self.check_model_init()
         self.model.load_state_dict(torch.load(model_file))
 
     def train(self, dataset, n_epochs):
         raise NotImplementedError
 
-    def predict(self, images):
+    def predict(self, images, transform=None):
+        self.check_model_init()
         self.model.eval() #TODO not a problem here ? -> see integration
+        # compute masks
         with torch.no_grad():
-            return torch.sigmoid(self.model(images.to(self.device)))
+            masks = torch.sigmoid(self.model(images.to(self.device)))
+        # post-processing
+        if transform is not None:
+            for i in range(len(masks)):
+                masks[i] = transform(masks[i].cpu()).to(self.device)
+        return masks
 
     def segment(self, dataset, dest='segmentations', batch_size=1, psize=None, 
-                norm=False, blur_ks=None, thresh=None, assess=False):
+                transform=None, assess=False):
         print("segmenting..")
         psize_given = (psize is not None)
         if psize_given:
@@ -53,13 +62,14 @@ class Segmenter:
             dest = dest[:len(dest)-1]
         if not os.path.exists(dest):
             os.makedirs(dest)
-        # compute segmentations
+        
         if assess:
             sum_dice = 0
             sum_jaccard = 0
-        count = 0
+        tf_resize = Resize()
         dl = DataLoader(dataset=dataset, batch_size=batch_size, num_workers=2)
         for i, (images, masks, files_id) in enumerate(dl):
+            # check dimensions
             im_h = images[0].shape[1]
             im_w = images[0].shape[2]
             if not psize_given:
@@ -67,69 +77,49 @@ class Segmenter:
                 patch_w = im_w
             if (im_h % patch_h) != 0 or (im_w % patch_w) != 0:
                 raise ValueError("the patch size must divide the image dimensions")
+            
             # compute masks using a sliding patch
-            masks_p = np.zeros((batch_size, im_h, im_w, 3), dtype=np.float32)
+            masks_p = torch.zeros((batch_size, 2, im_h, im_w), dtype=torch.float32)
             i_h = 0
             for j in range(im_h // patch_h):
                 i_w = 0
                 for k in range(im_w // patch_w):
                     patchs = images[:, :, i_h:(i_h+patch_h), i_w:(i_w+patch_w)]
-                    # predict masks
                     preds = self.predict(patchs)
-                    # metrics
-                    if assess:
-                        for l in range(len(preds)):
-                            mask = masks[l, :, i_h:(i_h+patch_h), 
-                                         i_w:(i_w+patch_w)].to(self.device)
-                            sum_dice += dice(preds[l], mask).item()
-                            sum_jaccard = jaccard(preds[l], mask).item()
-                    # recreate mask patchs from classes
-                    preds = preds.permute(0, 2, 3, 1).cpu().numpy()
-                    m_h = preds[0].shape[0]
-                    m_w = preds[0].shape[1]
+                    
                     for l in range(len(preds)):
-                        mask = preds[l, :, :, 1].reshape(m_h, m_w, 1)
-                        # post-processing
-                        if norm:
-                            mask = (mask - np.mean(mask))/np.std(mask)
-                        if blur_ks is not None:
-                            if blur_ks < 1:
-                                raise ValueError("blur size must be greater than 0")
-                            mask = cv2.blur(mask, (blur_ks, blur_ks))
-                        if thresh is not None:
-                            if thresh < 0 or thresh > 1:
-                                raise ValueError("threshold must belong to [0,1]")
-                            _, mask = cv2.threshold(mask, thresh, 1, cv2.THRESH_BINARY)
-                        mask = mask.reshape(m_h, m_w, 1)
-                        # convert to RGB image
-                        if assess:
-                            z = np.zeros((m_h, m_w, 1), dtype=np.float32)
-                            mask = np.concatenate((z, mask, z), axis=2)*180
-                        else:
-                            mask = np.concatenate((mask, mask, mask), axis=2)*255
+                        mask = preds[l].cpu()
                         # resize if necessary
-                        if mask.shape != (patch_h, patch_w):
-                            mask = cv2.resize(mask, (patch_w, patch_h))
+                        if mask.shape != (2, patch_h, patch_w):
+                            mask = tf_resize(mask, (patch_w, patch_h))
                         # write mask patch
-                        masks_p[l, i_h:(i_h+patch_h), i_w:(i_w+patch_w)] = mask
-
+                        masks_p[l, :, i_h:(i_h+patch_h), i_w:(i_w+patch_w)] = mask
                     i_w += patch_w
                 i_h += patch_h
-            # write the image files
+            
             for j in range(len(images)):
                 image = images[j]
                 mask = masks[j]
                 mask_p = masks_p[j]
+                # post-processing
+                if transform is not None:
+                    mask_p = transform(mask_p)
 
                 if assess:
-                    z = np.zeros((im_h, im_w, 1), dtype=np.float32)
-                    sep = np.ones((im_h, 10, 3), dtype=np.float32)*255
+                    # metrics
+                    sum_dice += dice(mask_p, mask).item()
+                    sum_jaccard = jaccard(mask_p, mask).item()
                     # convert tensors to numpy
                     image = image.permute(1, 2, 0).cpu().numpy()
                     mask = mask.permute(1, 2, 0).numpy()
-                    # recreate image mask from classes
+                    mask_p = mask_p.permute(1, 2, 0).numpy()
+                    # select foreground channel
                     mask = mask[:, :, 1].reshape(im_h, im_w, 1)*180
+                    mask_p = mask_p[:, :, 1].reshape(im_h, im_w, 1)*180
+                    # convert to RGB image
+                    z = np.zeros((im_h, im_w, 1), dtype=np.float32)
                     mask = np.concatenate((z, mask, z), axis=2)
+                    mask_p = np.concatenate((z, mask_p, z), axis=2)
                     # combine masks and images
                     sup = image + mask
                     sup_p = image + mask_p
@@ -138,27 +128,35 @@ class Segmenter:
                             fontFace=cv2.FONT_HERSHEY_SIMPLEX, color=(0, 0, 255))
                     cv2.putText(mask_p, "pred", (10, 30), fontScale=1, thickness=2,
                             fontFace=cv2.FONT_HERSHEY_SIMPLEX, color=(0, 0, 255))
-                    # final image
+                    # write final image
+                    sep = np.ones((im_h, 10, 3), dtype=np.float32)*255
                     img = np.concatenate((image, sep, 
                                           sup, sep, 
                                           sup_p, sep, 
                                           mask, sep, 
                                           mask_p), axis=1)
-                    cv2.imwrite(dest + "/seg" + str(count) + ".jpg", img)
-                else: # just the mask
+                    cv2.imwrite(dest + "/seg" + str(i+1) + ".jpg", img)
+                else:
+                    # convert tensor to numpy
+                    mask_p = mask_p.permute(1, 2, 0).numpy()
+                    # select foreground channel
+                    mask_p = mask_p[:, :, 1].reshape(im_h, im_w, 1)*255
+                    # convert to RGB image
+                    mask_p = np.concatenate((mask_p, mask_p, mask_p), axis=2)
+                    # write final image
                     cv2.imwrite(dest  + "/" + files_id[j] + "_y.jpg", mask_p)
-                count += 1
-                
+
+                # display info
                 if assess:
-                    print("segmentation: " + str(count) + "/" + str(len(dataset))
-                          + ", avg_dice: " + str(round(sum_dice/count, 4))
-                          + ", avg_jaccard: " + str(round(sum_jaccard/count, 4))
+                    print("segmentation: " + str(i+1) + "/" + str(len(dataset))
+                          + ", avg_dice: " + str(round(sum_dice/(i+1), 4))
+                          + ", avg_jaccard: " + str(round(sum_jaccard/(i+1), 4))
                           , end='\r')
                 else:
-                    print(f'segmentation: {count}/{len(dataset)}', end='\r')
+                    print(f'segmentation: {(i+1)}/{len(dataset)}', end='\r')
         print("\nsegmentation done")
 
-    def iter_data_imp(self, folder, n_iters, n_epochs, thresh=0.5, blur_ks=5):
+    def iter_data_imp(self, folder, n_iters, n_epochs, transform=None):
         # load the file list
         while folder[-1] == '/':
             folder = folder[:len(folder)-1]
@@ -177,8 +175,7 @@ class Segmenter:
         # improve the data
         for i in range(n_iters):
             self.train(ImgSet(dest), n_epochs)
-            self.segment(ImgSet(dest), dest=dest, norm=True, blur_ks=blur_ks,
-                         thresh=thresh)
+            self.segment(ImgSet(dest), dest=dest, transform=transform)
 
 class ImgSet(Dataset):
     def __init__(self, folder):

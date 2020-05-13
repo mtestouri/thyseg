@@ -154,7 +154,7 @@ def augment_dataset(folder):
     x_files = glob(folder + "/*_x.jpg")
     if len(x_files) == 0:
         raise FileNotFoundError("no files found in folder '" + folder + "'")
-    # define transforms
+    # define transform
     tf = iaa.Sequential([
         iaa.Fliplr(0.5),
         iaa.Flipud(0.5),
@@ -173,7 +173,7 @@ def augment_dataset(folder):
             raise FileNotFoundError("unable to load '" + y_file + "'")
         if y.shape != x.shape:
             y = cv2.resize(y, (x.shape[1], x.shape[0]), cv2.INTER_LINEAR)
-        # apply transforms
+        # apply transform
         y = SegmentationMapsOnImage(y, shape=x.shape)
         x, y = tf(image=x, segmentation_maps=y)
         # write files

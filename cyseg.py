@@ -1,6 +1,6 @@
 import argparse
 from segmenter import ImgSet
-from unet import UnetSegmenter
+from unet import UnetSegmenter, seg_postprocess, idi_postprocess
 
 if __name__ == "__main__":
     # parse arguments
@@ -43,26 +43,21 @@ if __name__ == "__main__":
         segmenter = UnetSegmenter()
         if args.load is not None:
             segmenter.load_model(args.load)
-        if args.psize is not None:
-            segmenter.segment(ImgSet(args.df), psize=args.psize, 
-                              thresh=args.thresh, assess=args.a)
-        else:
-            segmenter.segment(ImgSet(args.df), thresh=args.thresh, assess=args.a)
+        segmenter.segment(ImgSet(args.df), psize=args.psize, assess=args.a,
+                          transform=seg_postprocess(args.thresh))
     elif args.m == 'improve':
         segmenter = UnetSegmenter()
         if args.load is not None:
             segmenter.load_model(args.load)
+        if args.iters is None:
+            raise ValueError("must provide a number of iterations")
+        if args.thresh is None:
+            raise ValueError("must provide a mask threshold")
         if args.epochs is None:
             args.epochs = 1
-        if args.iters is not None:
-            if args.thresh is not None:
-                segmenter.iter_data_imp(args.df, args.iters, args.epochs,
-                                        args.thresh)
-            else:
-                segmenter.iter_data_imp(args.df, args.iters, args.epochs)
-            if args.save is not None:
-                segmenter.save_model(args.save)
-        else:
-            raise ValueError("must provide a number of iterations")
+        segmenter.iter_data_imp(args.df, args.iters, args.epochs,
+                                transform=idi_postprocess(args.thresh))
+        if args.save is not None:
+            segmenter.save_model(args.save)
     else:
         raise ValueError("unknown mode '" + args.m + "'")
