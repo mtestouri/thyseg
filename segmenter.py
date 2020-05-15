@@ -9,8 +9,6 @@ from shutil import copyfile
 from metrics import dice, jaccard
 from transforms import Resize
 
-# TODO union instead of replace in idi
-
 class Segmenter:
     def __init__(self):
         if torch.cuda.is_available():
@@ -31,12 +29,20 @@ class Segmenter:
         self.check_model_init()
         self.model.load_state_dict(torch.load(model_file))
 
+    def set_eval():
+        self.model.eval()
+
+    def set_train():
+        self.model.train()
+
     def train(self, dataset, n_epochs):
         raise NotImplementedError
 
     def predict(self, images, transform=None):
         self.check_model_init()
-        self.model.eval() #TODO not a problem here ? -> see integration
+        train_mode = self.model.training
+        if train_mode:
+            self.model.eval()
         # compute masks
         with torch.no_grad():
             masks = torch.sigmoid(self.model(images.to(self.device)))
@@ -44,6 +50,8 @@ class Segmenter:
         if transform is not None:
             for i in range(len(masks)):
                 masks[i] = transform(masks[i].cpu()).to(self.device)
+        if train_mode:
+            self.model.train()
         return masks
 
     def segment(self, dataset, dest='segmentations', batch_size=1, psize=None, 
@@ -65,6 +73,7 @@ class Segmenter:
         if assess:
             sum_dice = 0
             sum_jaccard = 0
+        self.model.eval()
         tf_resize = Resize()
         dl = DataLoader(dataset=dataset, batch_size=batch_size, num_workers=2)
         for i, (images, masks, files_id) in enumerate(dl):
@@ -107,7 +116,7 @@ class Segmenter:
                 if assess:
                     # metrics
                     sum_dice += dice(mask_p, mask).item()
-                    sum_jaccard = jaccard(mask_p, mask).item()
+                    sum_jaccard += jaccard(mask_p, mask).item()
                     # convert tensors to numpy
                     image = image.permute(1, 2, 0).cpu().numpy()
                     mask = mask.permute(1, 2, 0).numpy()
@@ -170,6 +179,12 @@ class Segmenter:
         for i in range(n_iters):
             self.train(ImgSet(dest), n_epochs)
             self.segment(ImgSet(dest), dest=dest, transform=transform)
+        # merge ground truth masks with predicted masks
+        for y_file in y_files:
+            y = cv2.imread(y_file)
+            y_pred = cv2.imread(dest + "/" + y_file[len(folder)+1:])
+            y_pred = cv2.bitwise_or(y, y_pred)
+            cv2.imwrite(dest  + "/" + y_file[len(folder)+1:], y_pred)
 
 class ImgSet(Dataset):
     def __init__(self, folder):

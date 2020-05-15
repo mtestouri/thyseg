@@ -1,7 +1,5 @@
 import torch
 
-# TODO dice > 1 et pb avec jaccard ??
-
 def dice(y_pred, y):
     smooth = 1.
     y_pred = torch.sigmoid(y_pred).view(len(y_pred), -1)
