@@ -1,6 +1,6 @@
 import sys
 from segmenter import Segmenter
-from transforms import Resize, Threshold, Normalize, Smoothing
+from transforms import Resize, Threshold, Normalize, Smoothing, ErodeDilate
 from metrics import dice
 import torch
 import torch.nn as nn
@@ -9,56 +9,50 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 import math
 
-SMOOTH_KS = 15 # smoothing kernel size
-
-def seg_postprocess(thresh=None):
-    if thresh is not None:
-        return transforms.Compose([
-                Smoothing(SMOOTH_KS),
-                Threshold(thresh)
-            ])
-    return None
+def seg_postprocess(thresh):
+    return transforms.Compose([
+            ErodeDilate(),
+            Smoothing(),
+            Threshold(thresh)
+        ])
 
 def idi_postprocess(thresh):
     return transforms.Compose([
             Normalize(),
-            Smoothing(SMOOTH_KS),
+            ErodeDilate(),
+            Smoothing(),
             Threshold(thresh)
         ])
 
-def dice_loss(y_pred, y):
-    return 1 - dice(y_pred, y)
+def dice_loss(y_pred, y, c_weights=None):
+    return 1 - dice(y_pred, y, c_weights)
 
 class SegLoss(nn.Module):
-    def __init__(self, mode='both'):
+    def __init__(self, c_weights=None):
         super().__init__()
-        if mode != 'both' and mode != 'bce' and mode != 'dice':
-            raise ValueError("invalid mode argument '" + mode + "'")
-        self.mode = mode
         self.bce_loss = nn.BCEWithLogitsLoss()
+        self.c_weights = c_weights
 
     def forward(self, y_pred, y):
-        if self.mode == 'bce':
-            return self.bce_loss(y_pred, y)
-        if self.mode == 'dice':
-            return dice_loss(y_pred, y)
-        return self.bce_loss(y_pred, y) + dice_loss(y_pred, y)
+        return self.bce_loss(y_pred, y) + dice_loss(y_pred, y, self.c_weights)
 
 class UnetSegmenter(Segmenter):
-    def __init__(self, init_depth=32):
-        super().__init__()
+    def __init__(self, init_depth=32, n_classes=2, c_weights=torch.Tensor([0, 1])):
+        super().__init__(c_weights)
         if init_depth < 1:
-            raise ValueError("initial depth must be greater than 0")
-        self.model = Unet(init_depth, n_classes=2).to(self.device)
+            raise ValueError("'init_depth' must be greater than 0")
+        if n_classes < 2:
+            raise ValueError("'n_classes' must be greater than 1")
+        self.model = Unet(init_depth, n_classes).to(self.device)
 
     def train(self, dataset, n_epochs):
         print("training the model..")
         if n_epochs < 1:
-            raise ValueError("the number of epochs must be greater than 0")
+            raise ValueError("'n_epochs' must be greater than 0")
         # training parameters
         batch_size = 1
         learning_rate = 0.0001
-        criterion = SegLoss() # custom loss
+        criterion = SegLoss(self.c_weights) # custom loss
         optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
         # train loop
         self.model.train()
@@ -76,8 +70,9 @@ class UnetSegmenter(Segmenter):
                 # forward pass
                 y_pred = self.model(x)
                 if y_pred.shape != y.shape:
-                    y = tf_resize(y.cpu(), (y_pred.shape[2], y_pred.shape[3]))
-                    y = y.to(self.device)
+                    for j in range(y.shape[0]):
+                        y[j] = tf_resize(y[j].cpu(), (y_pred.shape[2],
+                                         y_pred.shape[3])).to(self.device)
                 loss = criterion(y_pred, y)
                 sum_loss += loss.item()
                 sum_dice += dice_loss(y_pred, y).item() # compute dice loss
