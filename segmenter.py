@@ -32,6 +32,11 @@ class Segmenter:
         torch.save(self.model.state_dict(), model_file)
 
     def load_model(self, model_file):
+        """ Load the weights from a model file
+        
+        Beware that the depths of the segmenter and the model file 
+        must match.
+        """
         self.check_model_init()
         self.model.load_state_dict(torch.load(model_file))
 
@@ -202,8 +207,7 @@ class Segmenter:
                 y_pred = cv2.bitwise_or(y, y_pred)
                 cv2.imwrite(dest  + "/" + y_file[len(folder)+1:], y_pred)
 
-    def segment_r(self, images, cytomine_job, tsize, batch_size=4, 
-                  transform=None, assess=False):
+    def segment_r(self, images, tsize, batch_size=4, transform=None, assess=False):
         overlap = int(round(tsize / 2))
         #TODO boucler sur les images SLDC
         for image in images:

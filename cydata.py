@@ -18,11 +18,11 @@ import shapely.wkt
 
 def add_roi(id_project, id_image, hw=2048):
     if hw < 1:
-        raise ValueError("the ROI height and width must be greater than 0")
-    cred = json.load(open('credentials.json'))
-    with Cytomine(host=cred['host'], 
-                  public_key=cred['public_key'], 
-                  private_key=cred['private_key']) as conn:
+        raise ValueError("'hw' must be greater than 0")
+    cy = json.load(open('cytomine.json'))
+    with Cytomine(host=cy['host'], 
+                  public_key=cy['public_key'], 
+                  private_key=cy['private_key']) as conn:
         rectangle = box(10, 10, hw, hw)
         annotation = Annotation(location=rectangle.wkt,
                                 id_project=id_project,
@@ -94,7 +94,7 @@ def download_from_csv(filename, folder, imhw):
 
 def download_dataset(filename, folder, imhw=512):
     if imhw < 1:
-        raise ValueError("the image height and width must be greater than 0")
+        raise ValueError("'imhw' must be greater than 0")
     # hide logging
     logger = logging.getLogger()
     logger.disabled = True
@@ -102,10 +102,10 @@ def download_dataset(filename, folder, imhw=512):
     if not os.path.exists(folder):
         os.makedirs(folder)
 
-    cred = json.load(open('credentials.json'))
-    with Cytomine(host=cred['host'], 
-                  public_key=cred['public_key'], 
-                  private_key=cred['private_key']) as conn:
+    cy = json.load(open('cytomine.json'))
+    with Cytomine(host=cy['host'], 
+                  public_key=cy['public_key'], 
+                  private_key=cy['private_key']) as conn:
         if ".csv" in filename:
             download_from_csv(filename, folder, imhw)
         if ".json" in filename:
@@ -114,7 +114,7 @@ def download_dataset(filename, folder, imhw=512):
 def split_dataset(folder, split=0.8, seed=None):
     print("splitting dataset..")
     if (split < 0) or (split > 1):
-        raise ValueError("split must be between 0 and 1")
+        raise ValueError("'split' must belong to [0,1]")
     while folder[-1] == '/':
         folder = folder[:len(folder)-1]
     # load list of files
@@ -217,9 +217,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Cytomine datasets utilities.')
     parser.add_argument('-desc', metavar='filename', 
                         help='filename of the dataset descriptor')
-    parser.add_argument('-hw', metavar='value', type=int,
+    parser.add_argument('-hw', metavar='value', type=int, default=512,
                         help='image or ROI height and width')
-    parser.add_argument('-split', metavar='value', type=float,
+    parser.add_argument('-split', metavar='value', type=float, default=0.8,
                         help='split value')
     parser.add_argument('-seed', metavar='value', type=int, help='seed value')
     parser.add_argument('-p', metavar='id', type=int, help="project id")
@@ -235,28 +235,18 @@ if __name__ == "__main__":
             raise ValueError("must provide a project id")
         if args.i is None:
             raise ValueError("must provide an image id")
-        if args.hw is not None:
-            add_roi(args.p, args.i, args.hw)
-        else:
-            add_roi(args.p, args.i)
+        add_roi(args.p, args.i, args.hw)
     elif args.m == 'download':
         if args.desc is None:
             raise ValueError("must provide a dataset descriptor")
-        if args.hw is not None:
-            download_dataset(args.desc, args.df, args.hw)
-        else:
-            download_dataset(args.desc, args.df)
+        download_dataset(args.desc, args.df, args.hw)
     elif args.m == 'borders':
         draw_borders(args.df)
     elif args.m == 'split':
-        if (args.split is not None) and (args.seed is not None):
-            split_dataset(args.df, args.split, args.seed)
-        elif args.split is not None:
-            split_dataset(args.df, args.split)
-        elif args.seed is not None:
-            split_dataset(args.df, seed=args.seed)
+        if args.seed is not None:
+            split_dataset(args.df, split=args.split, seed=args.seed)
         else:
-            split_dataset(args.df)
+            split_dataset(args.df, split=args.split)
     elif args.m == 'augment':
         augment_dataset(args.df)
     else:

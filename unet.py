@@ -9,14 +9,14 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 import math
 
-def seg_postprocess(thresh):
+def seg_postprocess(thresh=0.5):
     return transforms.Compose([
             ErodeDilate(),
             Smoothing(),
             Threshold(thresh)
         ])
 
-def idi_postprocess(thresh):
+def idi_postprocess(thresh=0.5):
     return transforms.Compose([
             Normalize(),
             ErodeDilate(),

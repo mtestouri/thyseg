@@ -1,61 +1,76 @@
+import sys
 import argparse
 from segmenter import ImgSet
 from unet import UnetSegmenter, seg_postprocess, idi_postprocess
+from cytomine import CytomineJob
+import json
 
+#TODO doc
 if __name__ == "__main__":
     # parse arguments
     parser = argparse.ArgumentParser(description='Cell segmentation in '
                                      + 'whole-slide cytological images.')
+    parser.add_argument('-d', metavar='folder', help='dataset directory')
     parser.add_argument('-load', metavar='filename', 
                         help='filename of the model to load')
     parser.add_argument('-save', metavar='filename', 
                         help='filename of the model to save')
-    parser.add_argument('-epochs', metavar='number', type=int,
+    parser.add_argument('-epochs', metavar='number', type=int, default=1,
                         help='number of epochs for training')
-    parser.add_argument('-depth', metavar='value', type=int,
+    parser.add_argument('-depth', metavar='value', type=int, default=32,
                         help='model initial depth')
-    parser.add_argument('-thresh', metavar='value', type=float,
+    parser.add_argument('-thresh', metavar='value', type=float, default=0.5,
                         help='mask threshold value')
-    parser.add_argument('-iters', metavar='number', type=int,
+    parser.add_argument('-iters', metavar='number', type=int, default=2,
                         help='number of iterations in improve mode')
-    parser.add_argument('-psize', metavar='value', type=int, 
-                        help='segmentation patch size')
+    parser.add_argument('-tsize', metavar='value', type=int, default=512,
+                        help='segmentation tile size')
+    parser.add_argument('-dest', metavar='folder', default='segmentations',
+                        help='segmentations destination folder')
+    parser.add_argument('-i', metavar='id', type=int, nargs='+',
+                        help='cytomine image identifiers')
     parser.add_argument('-a', action='store_true',
                         help='flag for model assessment')
     parser.add_argument('m', metavar='mode',
                         help='modes: train, segment, improve')
-    parser.add_argument('df', metavar='folder', help='dataset directory')
     args = parser.parse_args()
     # run selected mode
     if args.m == 'train':
-        if args.depth is not None:
-            segmenter = UnetSegmenter(args.depth)
-        else:
-            segmenter = UnetSegmenter()
+        if args.d is None:
+            raise ValueError("must provide a dataset folder")
+        segmenter = UnetSegmenter(args.depth)
         if args.load is not None:
             segmenter.load_model(args.load)
-        if args.epochs is None:
-            args.epochs = 3
-        segmenter.train(ImgSet(args.df), args.epochs)
+        segmenter.train(ImgSet(args.d), args.epochs)
         if args.save is not None:
             segmenter.save_model(args.save)
     elif args.m == 'segment':
-        segmenter = UnetSegmenter()
+        if (args.d is None) and (args.i is None):
+            raise ValueError("must provide a dataset folder or an image identifier")
+        segmenter = UnetSegmenter(args.depth)
         if args.load is not None:
             segmenter.load_model(args.load)
-        segmenter.segment(ImgSet(args.df), psize=args.psize, assess=args.a,
-                          transform=seg_postprocess(args.thresh))
+        if args.d:
+            segmenter.segment(ImgSet(args.d), dest=args.dest, tsize=args.tsize,
+                              transform=seg_postprocess(args.thresh), assess=args.a)
+        if args.i:
+            cy = json.load(open('cytomine.json'))
+            cytomine_job = CytomineJob(
+                            host=cy['host'],
+                            public_key=cy['public_key'],
+                            private_key=cy['private_key'],
+                            software_id=cy['software_id'],
+                            project_id=cy['project_id'])
+            with cytomine_job as job:
+                segmenter.segment_r(args.i, tsize=args.tsize, assess=args.a,
+                                    transform=seg_postprocess(args.thresh))
     elif args.m == 'improve':
-        segmenter = UnetSegmenter()
+        if args.d is None:
+            raise ValueError("must provide a dataset folder")
+        segmenter = UnetSegmenter(args.depth)
         if args.load is not None:
             segmenter.load_model(args.load)
-        if args.iters is None:
-            raise ValueError("must provide a number of iterations")
-        if args.thresh is None:
-            raise ValueError("must provide a mask threshold")
-        if args.epochs is None:
-            args.epochs = 1
-        segmenter.iter_data_imp(args.df, args.iters, args.epochs,
+        segmenter.iter_data_imp(args.d, args.iters, args.epochs,
                                 transform=idi_postprocess(args.thresh))
         if args.save is not None:
             segmenter.save_model(args.save)
