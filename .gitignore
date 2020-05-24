@@ -1,9 +1,10 @@
 .vscode/
 __pycache__/
-d*/
+segmentations/
+results/
+tmp/
 *.txt
 *.csv
 *.pth
-segmentations*/
 *.tar.gz
 *.json

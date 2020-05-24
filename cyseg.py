@@ -15,7 +15,7 @@ if __name__ == "__main__":
                         help='filename of the model to load')
     parser.add_argument('-save', metavar='filename', 
                         help='filename of the model to save')
-    parser.add_argument('-epochs', metavar='number', type=int, default=1,
+    parser.add_argument('-epochs', metavar='number', type=int, default=3,
                         help='number of epochs for training')
     parser.add_argument('-depth', metavar='value', type=int, default=32,
                         help='model initial depth')
