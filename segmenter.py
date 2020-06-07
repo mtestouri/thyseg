@@ -336,9 +336,6 @@ class ImgSet(Dataset):
 class SldcDataset(Dataset):
     """for inference"""
     def __init__(self, wsi, tile_width, tile_height, overlap):
-        """
-        :wsi
-        """
         self._wsi = wsi
         topology = TileTopology(
             #TODO args for tmp

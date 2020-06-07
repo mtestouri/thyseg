@@ -3,7 +3,7 @@ import argparse
 import numpy as np
 from segmenter import ImgSet
 from unet import UnetSegmenter, seg_postprocess, idi_postprocess
-from cytomine import CytomineJob, Cytomine
+from cytomine import CytomineJob#, Cytomine
 import json
 
 #TODO doc
