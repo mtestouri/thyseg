@@ -9,10 +9,12 @@ from shutil import copyfile
 from metrics import dice, jaccard
 from transforms import Resize
 
-from cytomine.models import ImageInstance, Annotation
+from cytomine.models import ImageInstance, Annotation, AnnotationCollection
 from shapely.affinity import affine_transform
 from sldc import TileTopology, SemanticLocator, SemanticMerger
-from sldc_cytomine import CytomineSlide, CytomineTileBuilder
+from sldc_cytomine import CytomineSlide, CytomineTileBuilder, CytomineTile
+
+FOREGROUND = 154005477
 
 class Segmenter:
     def __init__(self, c_weights=None):
@@ -40,10 +42,10 @@ class Segmenter:
         self.check_model_init()
         self.model.load_state_dict(torch.load(model_file))
 
-    def set_eval():
+    def set_eval(self):
         self.model.eval()
 
-    def set_train():
+    def set_train(self):
         self.model.train()
 
     def train(self, dataset, n_epochs):
@@ -207,43 +209,81 @@ class Segmenter:
                 y_pred = cv2.bitwise_or(y, y_pred)
                 cv2.imwrite(dest  + "/" + y_file[len(folder)+1:], y_pred)
 
-    def segment_r(self, images, tsize, batch_size=4, transform=None, assess=False):
-        overlap = int(round(tsize / 2))
-        #TODO boucler sur les images SLDC
-        for image in images:
-            # fetch image and build tile dataset
-            image_instance = ImageInstance().fetch(image)
-            wsi = CytomineSlide(image) #w = wsi.window()
-            dataset = SldcDataset(wsi, tsize, tsize, overlap, skip_border=True)
+    def segment_r(self, image_ids, windows=[], tsize=512, batch_size=4, transform=None):
+        for image_id in image_ids:
+            if len(windows) > 0:
+                for window in windows:
+                    self.segment_wsi(image_id, window, tsize, batch_size, transform)
+            else:
+                self.segment_wsi(image_id, [], tsize, batch_size, transform)
 
-            polygons, tile_ids = list(), list()
-            dl = DataLoader(dataset=dataset, batch_size=batch_size, num_workers=2)
-            for x, ids in dl:
-                y = self.predict(x, transform) # predict tile masks
-                y = y[:, 1, :, :] # convert to 1 channel
+    def segment_wsi(self, image_id, window=[], tsize=512, batch_size=4, transform=None):
+        # overlap between tiles
+        overlap = int(round(tsize / 4))
+        
+        # fetch wsi
+        image_instance = ImageInstance().fetch(image_id)
 
-                # turn prediction into polygons
-                locator = SemanticLocator(background=0) # transform mask to polygons
-                batch_size = x.dims(0)
-                for i in range(batch_size):
-                    mask = y[i].cpu().numpy()
-                    polygons.append(locator.locate(mask, 
-                                    offset=dataset.topology.tile_offset(ids[i])))
-                tile_ids.extend(ids)
-            
-            # merge polygon overlapping several tiles
-            merged = SemanticMerger(tolerance=0).merge(tile_ids, polygons,
-                                                       dataset.topology)
-            # upload to cytomine
-            for polygon in merged:
+        # create window
+        if len(window) == 4:
+            off_x = window[0]
+            off_y = window[1]
+            w_width = window[2]
+            w_height = window[3]
+            wsi = CytomineSlide(image_id).window(
+                (off_x, image_instance.height - off_y - w_height), w_width, w_height)
+        else:
+            off_x = 0
+            off_y = 0
+            w_height = image_instance.height
+            wsi = CytomineSlide(image_id)
+        
+        # dataset
+        dataset = SldcDataset(wsi, tsize, tsize, overlap)
+        dl = DataLoader(dataset=dataset, batch_size=batch_size)
+
+        self.set_eval()
+        tile_polygons, tile_ids = list(), list()
+        for x, ids in dl:
+            # convert to from RGB to BGR tensors
+            x = x[:, :, :, [2, 1, 0]].permute(0, 3, 1, 2).float()                
+            # predict tile masks
+            y = self.predict(x, transform)
+            # select foreground channel
+            y = y.permute(0, 2, 3, 1)[:, :, :, 1].cpu().numpy()
+
+            # turn prediction into polygons
+            locator = SemanticLocator(background=0) 
+            for i in range(y.shape[0]):
+                mask = y[i]
+                polygons = locator.locate(mask, 
+                                    offset=dataset.topology.tile_offset(ids[i]))
+                if len(polygons) > 0:
+                    polygons, _ = zip(*polygons)
+                    tile_polygons.append(polygons)
+                else:
+                    tile_polygons.append(list())
+            tile_ids.extend(ids.numpy())
+
+        # merge polygon overlapping several tiles
+        merged = SemanticMerger(tolerance=1).merge(tile_ids, tile_polygons,
+                                dataset.topology)            
+
+        # upload to cytomine
+        anns = AnnotationCollection()
+        for polygon in merged:
+            anns.append(
                 Annotation(
-                    location=change_referential(polygon, wsi.height).wkt,
-                    id_image=image_instance.id,
-                    id_project=image_instance.id_project
-                ).save()
+                location=change_referential(polygon, off_x, off_y, w_height).wkt,
+                id_image=image_instance.id,
+                id_project=image_instance.project,
+                term=[FOREGROUND]
+                )
+            )
+        anns.save(n_workers=4)
 
-def change_referential(p, height):
-    return affine_transform(p, [1, 0, 0, -1, 0, height])
+def change_referential(p, off_x, off_y, w_height):
+    return affine_transform(p, [1, 0, 0, -1, off_x, off_y + w_height])
 
 def skip_tile(tile_id, topology):
     tile_col, tile_row = topology._tile_coord(tile_id)
@@ -295,29 +335,21 @@ class ImgSet(Dataset):
 
 class SldcDataset(Dataset):
     """for inference"""
-    def __init__(self, wsi, tile_width, tile_height, overlap, skip_border=True):
+    def __init__(self, wsi, tile_width, tile_height, overlap):
         """
-        :param skip_border: True for skipping border tiles of which dimensions does
-        not match (tile_height, tile_width)
+        :wsi
         """
         self._wsi = wsi
         topology = TileTopology(
-            #TODO clear tmp folder after use ?
+            #TODO args for tmp
             image=wsi, tile_builder=CytomineTileBuilder('tmp'),
             max_width=tile_width, max_height=tile_height,
             overlap=overlap
         )
         self._topology = topology
-        self._skip_border = skip_border
         self._tile_width = tile_width
         self._tile_height = tile_height
         self._overlap = overlap
-        # maps dataset index with tile identifier
-        if not skip_border:
-            self._kept_tile_map = np.arange(self._topology.tile_count) + 1
-        else:
-            self._kept_tile_map = np.where([not skip_tile(tile.identifier,
-                                         topology) for tile in topology])[0] + 1
 
     @property
     def topology(self):
@@ -325,9 +357,20 @@ class SldcDataset(Dataset):
 
     def __getitem__(self, index):
         """Return (numpy image of a tile, tile identifier)"""
-        identifier = self._kept_tile_map[index]
+        identifier = index + 1
         tile = self._topology.tile(identifier)
+        
+        # check if the tile is complete
+        if skip_tile(identifier, self.topology):
+            off_x = tile.offset_x - (self._tile_width - tile.width)
+            off_y = tile.offset_y - (self._tile_height - tile.height)
+            offset = (off_x, off_y)
+            
+            # remplace the incomplete tile with a complete one
+            tile = CytomineTile(tile._working_path, tile._parent, offset, 
+                                self._tile_width, self._tile_height)
+        
         return tile.np_image, identifier
 
     def __len__(self):
-        return self._kept_tile_map.shape[0]
+        return self.topology.tile_count

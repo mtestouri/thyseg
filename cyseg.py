@@ -1,8 +1,9 @@
 import sys
 import argparse
+import numpy as np
 from segmenter import ImgSet
 from unet import UnetSegmenter, seg_postprocess, idi_postprocess
-from cytomine import CytomineJob
+from cytomine import CytomineJob, Cytomine
 import json
 
 #TODO doc
@@ -28,7 +29,9 @@ if __name__ == "__main__":
     parser.add_argument('-dest', metavar='folder', default='segmentations',
                         help='segmentations destination folder')
     parser.add_argument('-i', metavar='id', type=int, nargs='+',
-                        help='cytomine image identifiers')
+                        help='cytomine wsi identifiers')
+    parser.add_argument('-w', metavar='win', nargs='+', default=[],
+                        help='wsi windows : [x,y,width,height ...]')
     parser.add_argument('-a', action='store_true',
                         help='flag for model assessment')
     parser.add_argument('m', metavar='mode',
@@ -54,15 +57,30 @@ if __name__ == "__main__":
             segmenter.segment(ImgSet(args.d), dest=args.dest, tsize=args.tsize,
                               transform=seg_postprocess(args.thresh), assess=args.a)
         if args.i:
+            # check windows
+            windows = list()
+            for window in args.w:
+                try:
+                    window = np.array(eval(window), dtype=np.int)
+                except:
+                    raise ValueError("invalid window : " + str(window))
+                if window.shape != (4,):
+                    raise ValueError("invalid window : " + str(window))
+                windows.append(window)
+            windows = np.array(windows, dtype=np.int)
+
             cy = json.load(open('cytomine.json'))
+            #with Cytomine(host=cy['host'], 
+            #              public_key=cy['public_key'], 
+            #              private_key=cy['private_key']) as conn:
             cytomine_job = CytomineJob(
                             host=cy['host'],
                             public_key=cy['public_key'],
                             private_key=cy['private_key'],
                             software_id=cy['software_id'],
                             project_id=cy['project_id'])
-            with cytomine_job as job:
-                segmenter.segment_r(args.i, tsize=args.tsize, assess=args.a,
+            with cytomine_job as job:    
+                segmenter.segment_r(args.i, windows, tsize=args.tsize,
                                     transform=seg_postprocess(args.thresh))
     elif args.m == 'improve':
         if args.d is None:
