@@ -14,9 +14,20 @@ from shapely.affinity import affine_transform
 from sldc import TileTopology, SemanticLocator, SemanticMerger
 from sldc_cytomine import CytomineSlide, CytomineTileBuilder, CytomineTile
 
+
 FOREGROUND = 154005477
 
+
 class Segmenter:
+    """
+    generic segmenter
+
+    parameters
+    ----------
+    c_weights: float array
+        class weights used for loss computation
+    """
+    
     def __init__(self, c_weights=None):
         if torch.cuda.is_available():
             self.device = torch.device('cuda')
@@ -30,45 +41,110 @@ class Segmenter:
             raise ValueError("variable 'self.model' not initialized")
 
     def save_model(self, model_file):
+        """
+        save the model weights
+
+        parameters
+        ----------
+        model_file: string
+            file where the model is saved
+        """
+
         self.check_model_init()
         torch.save(self.model.state_dict(), model_file)
 
     def load_model(self, model_file):
-        """ Load the weights from a model file
-        
-        Beware that the depths of the segmenter and the model file 
-        must match.
         """
+        load the model weights
+
+        parameters
+        ----------
+        model_file: string
+            model file to load\n
+            beware that the depth of the segmenter and the model file must match
+        """
+
         self.check_model_init()
         self.model.load_state_dict(torch.load(model_file))
 
     def set_eval(self):
+        """
+        set the model in evaluation mode
+        """
         self.model.eval()
 
     def set_train(self):
+        """
+        set the model in training mode
+        """
         self.model.train()
 
     def train(self, dataset, n_epochs):
         raise NotImplementedError
 
     def predict(self, images, transform=None):
+        """
+        segment a batch of images
+
+        parameters
+        ----------
+        images: tensor
+            images tensor of shape: (batch_size, n_channels, height, width)
+
+        transform: Transform
+            transform to apply to the predicted masks
+
+        returns
+        -------
+        masks: tensor
+            masks tensor of shape: (batch_size, n_channels, height, width)
+        """
+
         self.check_model_init()
         train_mode = self.model.training
         if train_mode:
             self.model.eval()
+        
         # compute masks
         with torch.no_grad():
             masks = torch.sigmoid(self.model(images.to(self.device)))
+        
         # post-processing
         if transform is not None:
             for i in range(len(masks)):
                 masks[i] = transform(masks[i].cpu()).to(self.device)
+        
         if train_mode:
             self.model.train()
         return masks
 
     def segment(self, dataset, dest='segmentations', tsize=None, batch_size=1,  
                 transform=None, assess=False):
+        """
+        segment a dataset
+
+        parameters
+        ----------
+        dataset: ImgSet
+            dataset to segment
+
+        dest: string
+            predicted masks destination folder
+
+        tsize: int
+            tile size
+
+        batch_size: int
+            batch size
+
+        transform: Transform
+            transform to apply to the predicted masks
+
+        assess: bool
+            toggle assessment mode which will compute the metrics and write the 
+            predicted masks along with their ground truth counterparts
+        """
+
         print("segmenting..")
         tsize_given = (tsize is not None)
         if tsize_given:
@@ -77,6 +153,7 @@ class Segmenter:
             else:
                 tile_h = tsize
                 tile_w = tsize
+        
         # create folder
         while dest[-1] == '/':
             dest = dest[:len(dest)-1]
@@ -86,6 +163,7 @@ class Segmenter:
         if assess:
             sum_dice = 0
             sum_jaccard = 0
+        
         self.model.eval()
         tf_resize = Resize()
         dl = DataLoader(dataset=dataset, batch_size=batch_size, num_workers=2)
@@ -110,9 +188,11 @@ class Segmenter:
                     
                     for l in range(len(preds)):
                         mask = preds[l].cpu()
+                        
                         # resize if necessary
                         if mask.shape != (2, tile_h, tile_w):
                             mask = tf_resize(mask, (tile_w, tile_h))
+                        
                         # write mask tile
                         masks_p[l, :, i_h:(i_h+tile_h), i_w:(i_w+tile_w)] = mask
                     i_w += tile_w
@@ -120,13 +200,15 @@ class Segmenter:
             
             for j in range(len(images)):
                 image = images[j]
-                mask = masks[j]
                 mask_p = masks_p[j]
+                
                 # post-processing
                 if transform is not None:
                     mask_p = transform(mask_p)
 
                 if assess:
+                    mask = masks[j]
+
                     # metrics
                     mask = mask.unsqueeze(0)
                     mask_p = mask_p.unsqueeze(0)
@@ -134,20 +216,25 @@ class Segmenter:
                     sum_jaccard += jaccard(mask_p, mask, self.c_weights).item()
                     mask = mask.squeeze(0)
                     mask_p = mask_p.squeeze(0)
+                    
                     # convert tensors to numpy
                     image = image.permute(1, 2, 0).cpu().numpy()
                     mask = mask.permute(1, 2, 0).numpy()
                     mask_p = mask_p.permute(1, 2, 0).numpy()
+                    
                     # select foreground channel
                     mask = mask[:, :, 1].reshape(im_h, im_w, 1)*180
                     mask_p = mask_p[:, :, 1].reshape(im_h, im_w, 1)*180
+                    
                     # convert to RGB image
                     z = np.zeros((im_h, im_w, 1), dtype=np.float32)
                     mask = np.concatenate((z, mask, z), axis=2)
                     mask_p = np.concatenate((z, mask_p, z), axis=2)
+                    
                     # combine masks and images
                     sup = image + mask
                     sup_p = image + mask_p
+                    
                     # write final image
                     sep = np.ones((im_h, 10, 3), dtype=np.float32)*255
                     img = np.concatenate((image, sep, 
@@ -159,10 +246,13 @@ class Segmenter:
                 else:
                     # convert tensor to numpy
                     mask_p = mask_p.permute(1, 2, 0).numpy()
+                    
                     # select foreground channel
                     mask_p = mask_p[:, :, 1].reshape(im_h, im_w, 1)*255
+                    
                     # convert to RGB image
                     mask_p = np.concatenate((mask_p, mask_p, mask_p), axis=2)
+                    
                     # write final image
                     cv2.imwrite(dest  + "/" + files_id[j] + "_y.jpg", mask_p)
 
@@ -176,7 +266,26 @@ class Segmenter:
                     print(f'segmentation: {(i+1)}/{len(dataset)}', end='\r')
         print("\nsegmentation done")
 
+
     def iter_data_imp(self, folder, n_iters, n_epochs, transform=None):
+        """
+        iterative data improvement of a dataset
+
+        parameters
+        ----------
+        folder: string
+            folder of the dataset to improve
+
+        n_iters: int
+            number of improvement iterations
+
+        n_epochs: int
+            number of epochs for training
+
+        transform: Transform
+            transform to apply to the predicted masks
+        """
+
         # load the file list
         while folder[-1] == '/':
             folder = folder[:len(folder)-1]
@@ -184,6 +293,7 @@ class Segmenter:
         y_files = glob(folder + "/*_y.jpg")
         if len(x_files) == 0:
             raise FileNotFoundError("no files found in folder '" + folder + "'")
+        
         # copy the files into the new folder
         dest = folder + "_imp"
         if not os.path.exists(dest):
@@ -192,6 +302,7 @@ class Segmenter:
             copyfile(x_file, dest + "/" + x_file[len(folder)+1:])
         for y_file in y_files:
             copyfile(y_file, dest + "/" + y_file[len(folder)+1:])
+        
         # improve the data
         for i in range(n_iters):
             self.train(ImgSet(dest), n_epochs)
@@ -210,6 +321,28 @@ class Segmenter:
                 cv2.imwrite(dest  + "/" + y_file[len(folder)+1:], y_pred)
 
     def segment_r(self, image_ids, windows=[], tsize=512, batch_size=4, transform=None):
+        """
+        remote segmentation of WSIs
+
+        parameters
+        ----------
+        image_ids: int array
+            ids of WSIs to segment
+
+        windows: array of int array
+            the windows where to perform the segmentations, windows are in 
+            the form : [off_x, off_y, width, height]
+
+        tsize: int
+            tile size
+
+        batch_size: int
+            batch size
+
+        transform: Transform
+            transform to apply to the predicted masks
+        """
+
         for image_id in image_ids:
             if len(windows) > 0:
                 for window in windows:
@@ -218,6 +351,28 @@ class Segmenter:
                 self.segment_wsi(image_id, [], tsize, batch_size, transform)
 
     def segment_wsi(self, image_id, window=[], tsize=512, batch_size=4, transform=None):
+        """
+        remote segmentation of a WSI
+
+        parameters
+        ----------
+        image_id: int
+            id of the WSI to segment
+
+        windows: int array
+            the window where to perform the segmentation, the window is in 
+            the form : [off_x, off_y, width, height]
+
+        tsize: int
+            tile size
+
+        batch_size: int
+            batch size
+
+        transform: Transform
+            transform to apply to the predicted masks
+        """
+        
         # overlap between tiles
         overlap = int(round(tsize / 4))
         
@@ -267,7 +422,7 @@ class Segmenter:
 
         # merge polygon overlapping several tiles
         merged = SemanticMerger(tolerance=1).merge(tile_ids, tile_polygons,
-                                dataset.topology)            
+                                dataset.topology)
 
         # upload to cytomine
         anns = AnnotationCollection()
@@ -282,8 +437,10 @@ class Segmenter:
             )
         anns.save(n_workers=4)
 
+
 def change_referential(p, off_x, off_y, w_height):
     return affine_transform(p, [1, 0, 0, -1, off_x, off_y + w_height])
+
 
 def skip_tile(tile_id, topology):
     tile_col, tile_row = topology._tile_coord(tile_id)
@@ -292,53 +449,98 @@ def skip_tile(tile_id, topology):
     return (skip_bottom and tile_row == topology.tile_vertical_count - 1) or \
            (skip_right and tile_col == topology.tile_horizontal_count - 1)
 
+
 class ImgSet(Dataset):
-    def __init__(self, folder):
+    """
+    image dataset
+
+    parameters
+    ----------
+    folder: string
+        folder of the dataset to load, files are in the form 
+        'id_x.jpg' (images) and 'id_y.jpg' (masks)
+
+    masks: bool
+        toggle the loading of the masks
+    """
+
+    def __init__(self, folder, masks=True):
         while folder[-1] == '/':
             folder = folder[:len(folder)-1]
         self.df = folder
+        self.masks = masks
+        
         # load list of files
         self.files = glob(self.df + "/*_x.jpg")
         if len(self.files) == 0:
             raise FileNotFoundError("no files found in folder '" + self.df + "'")
+        
         # define dataset image size
         self.im_h = None
         self.im_w = None
         (x, _, _) = self.__getitem__(0)
         self.im_h = x.shape[1]
         self.im_w = x.shape[2]
-        
+    
     def __getitem__(self, index):
-        # load image files
+        # load image
         x_file = self.files[index]
         file_id = x_file[len(self.df)+1:len(x_file)-6]
-        y_file = self.df + "/" + file_id + "_y.jpg"
         x = cv2.imread(x_file)
-        y = cv2.imread(y_file)
-        if y is None:
-            raise FileNotFoundError("unable to load '" + y_file + "'")
+        
+        # load mask
+        if self.masks:
+            y_file = self.df + "/" + file_id + "_y.jpg"
+            y = cv2.imread(y_file)
+            if y is None:
+                raise FileNotFoundError("unable to load '" + y_file + "'")
+        
         # check size
         if (self.im_h is not None) and (self.im_w is not None):
             if (x.shape[0] != self.im_h) or (x.shape[1] != self.im_w):
                 x = cv2.resize(x, (self.im_w, self.im_h), cv2.INTER_LINEAR)
-            if (y.shape[0] != self.im_h) or (y.shape[1] != self.im_w):
-                y = cv2.resize(y, (self.im_w, self.im_h), cv2.INTER_LINEAR) 
-        # RGB masks to classe masks
-        y = np.abs(np.round(y/255)[:, :, :2] - (1, 0))
-        # convert to tensors
+            if self.masks:
+                if (y.shape[0] != self.im_h) or (y.shape[1] != self.im_w):
+                    y = cv2.resize(y, (self.im_w, self.im_h), cv2.INTER_LINEAR) 
+        
+        # convert to tensor
         x = torch.from_numpy(x).float().permute(2, 0, 1)
-        y = torch.from_numpy(y).float().permute(2, 0, 1)
-        return x, y, file_id
+        
+        if self.masks:
+            # RGB masks to classe masks
+            y = np.abs(np.round(y/255)[:, :, :2] - (1, 0))
+            # convert to tensor
+            y = torch.from_numpy(y).float().permute(2, 0, 1)
+            return x, y, file_id
+        else:
+            return x, x, file_id
 
     def __len__(self):
         return len(self.files)
 
+
 class SldcDataset(Dataset):
-    """for inference"""
+    """
+    SLDC dataset
+
+    parameters
+    ----------
+    wsi: CytomineSlide
+        CytomineSlide object
+        
+    tile_width: int
+        tile width
+
+    tile_height: int
+        tile height
+
+    overlap: int
+        overlap between tiles
+    """
+    
     def __init__(self, wsi, tile_width, tile_height, overlap):
         self._wsi = wsi
         topology = TileTopology(
-            #TODO args for tmp
             image=wsi, tile_builder=CytomineTileBuilder('tmp'),
             max_width=tile_width, max_height=tile_height,
             overlap=overlap

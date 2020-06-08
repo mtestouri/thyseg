@@ -5,6 +5,5 @@ results/
 tmp/
 *.txt
 *.csv
-*.pth
 *.tar.gz
 *.json
