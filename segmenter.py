@@ -397,6 +397,7 @@ class Segmenter:
         dataset = SldcDataset(wsi, tsize, tsize, overlap)
         dl = DataLoader(dataset=dataset, batch_size=batch_size)
 
+        count = 0
         self.set_eval()
         tile_polygons, tile_ids = list(), list()
         for x, ids in dl:
@@ -420,11 +421,16 @@ class Segmenter:
                     tile_polygons.append(list())
             tile_ids.extend(ids.numpy())
 
+            count += x.shape[0]
+            print(f'processed tiles {count}/{len(dataset)}')
+        
         # merge polygon overlapping several tiles
+        print("merging polygons..")
         merged = SemanticMerger(tolerance=1).merge(tile_ids, tile_polygons,
                                 dataset.topology)
-
+        
         # upload to cytomine
+        print("uploading annotations..")
         anns = AnnotationCollection()
         for polygon in merged:
             anns.append(
@@ -443,9 +449,11 @@ def change_referential(p, off_x, off_y, w_height):
 
 
 def skip_tile(tile_id, topology):
-    tile_col, tile_row = topology._tile_coord(tile_id)
-    skip_bottom = (topology._image.height % topology._max_height) != 0
-    skip_right = (topology._image.width % topology._max_width) != 0
+    tile_row, tile_col = topology._tile_coord(tile_id)
+    skip_bottom = (topology._image.height 
+                   % (topology._max_height - topology._overlap)) != 0
+    skip_right = (topology._image.width 
+                  % (topology._max_width - topology._overlap)) != 0
     return (skip_bottom and tile_row == topology.tile_vertical_count - 1) or \
            (skip_right and tile_col == topology.tile_horizontal_count - 1)
 

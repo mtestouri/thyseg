@@ -18,7 +18,7 @@ if __name__ == "__main__":
                         help='filename of the model to save')
     parser.add_argument('-epochs', metavar='number', type=int, default=3,
                         help='number of epochs for training')
-    parser.add_argument('-depth', metavar='value', type=int, default=32,
+    parser.add_argument('-depth', metavar='value', type=int, default=16,
                         help='model initial depth')
     parser.add_argument('-thresh', metavar='value', type=float, default=0.5,
                         help='mask threshold value')
@@ -36,6 +36,18 @@ if __name__ == "__main__":
                         help='flag for model assessment')
     parser.add_argument('m', metavar='mode',
                         help='modes: train, segment, improve')
+    # Cytomine arguments
+    if "-i" in sys.argv:
+        parser.add_argument('--host', required=True,
+                            help='Cytomine host')
+        parser.add_argument('--public_key', required=True,
+                            help='Cytomine public key')
+        parser.add_argument('--private_key', required=True,
+                            help='Cytomine private key')
+        parser.add_argument('--cytomine_id_project', required=True,
+                            help='project id')
+        parser.add_argument('--cytomine_id_software', required=True,
+                            help='software id')
     args = parser.parse_args()
     
     if args.m == 'train':
@@ -74,14 +86,14 @@ if __name__ == "__main__":
             windows = np.array(windows, dtype=np.int)
 
             cy = json.load(open('cytomine.json'))
-            with Cytomine(host=cy['host'], 
-                          public_key=cy['public_key'], 
-                          private_key=cy['private_key']) as conn:
-            #with CytomineJob(host=cy['host'],
-            #                 public_key=cy['public_key'],
-            #                 private_key=cy['private_key'],
-            #                 software_id=cy['software_id'],
-            #                 project_id=cy['project_id']) as job:
+            #with Cytomine(host=args.host,
+            #              public_key=args.public_key,
+            #              private_key=args.private_key) as conn:
+            with CytomineJob(host=args.host,
+                             public_key=args.public_key,
+                             private_key=args.private_key,
+                             software_id=args.cytomine_id_software,
+                             project_id=args.cytomine_id_project) as job:
                 segmenter.segment_r(args.i, windows, tsize=args.tsize,
                                     transform=seg_postprocess(args.thresh))
     
