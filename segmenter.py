@@ -16,6 +16,7 @@ from sldc_cytomine import CytomineSlide, CytomineTileBuilder, CytomineTile
 
 
 FOREGROUND = 154005477
+SIMPLIFY_TOLERANCE = 4
 
 
 class Segmenter:
@@ -416,7 +417,14 @@ class Segmenter:
                                     offset=dataset.topology.tile_offset(ids[i]))
                 if len(polygons) > 0:
                     polygons, _ = zip(*polygons)
+                    polygons = list(polygons)
+
+                    # simplify the polygons to reduce memory usage
+                    for j in range(len(polygons)):
+                        polygons[j] = polygons[j].simplify(SIMPLIFY_TOLERANCE)
+
                     tile_polygons.append(polygons)
+
                 else:
                     tile_polygons.append(list())
             tile_ids.extend(ids.numpy())
@@ -549,7 +557,7 @@ class SldcDataset(Dataset):
     def __init__(self, wsi, tile_width, tile_height, overlap):
         self._wsi = wsi
         topology = TileTopology(
-            image=wsi, tile_builder=CytomineTileBuilder('tmp'),
+            image=wsi, tile_builder=CytomineTileBuilder('__cache__'),
             max_width=tile_width, max_height=tile_height,
             overlap=overlap
         )

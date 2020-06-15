@@ -2,7 +2,7 @@
 __pycache__/
 segmentations/
 results/
-tmp/
+__cache__/
 *.txt
 *.csv
 *.tar.gz
