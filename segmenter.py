@@ -102,21 +102,24 @@ class Segmenter:
         """
 
         self.check_model_init()
+        # check eval mode
         train_mode = self.model.training
         if train_mode:
             self.model.eval()
         
-        # compute masks
         with torch.no_grad():
+            # compute masks
             masks = torch.sigmoid(self.model(images.to(self.device)))
         
-        # post-processing
-        if transform is not None:
-            for i in range(len(masks)):
-                masks[i] = transform(masks[i].cpu()).to(self.device)
-        
+            # post-processing
+            if transform is not None:
+                for i in range(len(masks)):
+                    masks[i] = transform(masks[i].cpu()).to(self.device)
+            
+        # optionally restore train mode
         if train_mode:
             self.model.train()
+        
         return masks
 
     def segment(self, dataset, dest='segmentations', tsize=None, batch_size=1,  
@@ -400,6 +403,7 @@ class Segmenter:
 
         count = 0
         self.set_eval()
+        locator = SemanticLocator(background=0)
         tile_polygons, tile_ids = list(), list()
         for x, ids in dl:
             # convert to from RGB to BGR tensors
@@ -410,10 +414,8 @@ class Segmenter:
             y = y.permute(0, 2, 3, 1)[:, :, :, 1].cpu().numpy()
 
             # turn prediction into polygons
-            locator = SemanticLocator(background=0) 
             for i in range(y.shape[0]):
-                mask = y[i]
-                polygons = locator.locate(mask, 
+                polygons = locator.locate(y[i], 
                                     offset=dataset.topology.tile_offset(ids[i]))
                 if len(polygons) > 0:
                     polygons, _ = zip(*polygons)
@@ -427,8 +429,8 @@ class Segmenter:
 
                 else:
                     tile_polygons.append(list())
-            tile_ids.extend(ids.numpy())
 
+            tile_ids.extend(ids.numpy())
             count += x.shape[0]
             print(f'processed tiles {count}/{len(dataset)}')
         
