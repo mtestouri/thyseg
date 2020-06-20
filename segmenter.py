@@ -124,15 +124,89 @@ class Segmenter:
         
         return masks
 
-    def segment(self, dataset, dest='segmentations', tsize=None, batch_size=1,  
-                transform=None, assess=False):
+    def segment_core(self, images, tsize=None, transform=None):
         """
-        segment a dataset
+        segment a batch of images using tiles
 
         parameters
         ----------
-        dataset: ImgSet
-            dataset to segment
+        images: tensor
+            images tensor of shape: (batch_size, n_channels, height, width)
+
+        tsize: int
+            tile size
+
+        transform: Transform
+            transform to apply to the predicted masks
+
+        returns
+        -------
+        masks: tensor
+            masks tensor of shape: (batch_size, n_channels, height, width)
+        """
+
+        # image dimensions
+        im_h = images[0].shape[1]
+        im_w = images[0].shape[2]
+
+        # init tsize
+        if tsize is not None:
+            if tsize < 1:
+                raise ValueError("'tsize' must be greater than 0")
+            else:
+                tile_h = tsize
+                tile_w = tsize
+
+            # check dimensions
+            if (im_h % tile_h) != 0 or (im_w % tile_w) != 0:
+                raise ValueError("the tile size must divide the image dimensions") 
+        else:
+            tile_h = im_h
+            tile_w = im_w
+        
+        # inits
+        self.set_eval()
+        tf_resize = Resize()
+        masks = torch.zeros((images.shape[0], 2, im_h, im_w), dtype=torch.float32)
+        
+        # compute masks using tiles
+        i_h = 0
+        for i in range(im_h // tile_h):
+            i_w = 0
+            for j in range(im_w // tile_w):
+                # extract tiles
+                tiles = images[:, :, i_h:(i_h+tile_h), i_w:(i_w+tile_w)]
+                # compute tile masks
+                preds = self.predict(tiles)
+                    
+                for k in range(preds.shape[0]):
+                    mask = preds[k].cpu()
+                    # resize if necessary
+                    if mask.shape != (2, tile_h, tile_w):
+                        mask = tf_resize(mask, (tile_w, tile_h))
+                    
+                    # write tile mask
+                    masks[k, :, i_h:(i_h+tile_h), i_w:(i_w+tile_w)] = mask
+
+                i_w += tile_w
+            i_h += tile_h
+
+        # post-processing
+        if transform is not None:
+            for i in range(masks.shape[0]):
+                masks[i] = transform(masks[i])
+
+        return masks
+
+    def segment_folder(self, folder, dest='segmentations', tsize=None, 
+                       batch_size=1, transform=None, assess=False):
+        """
+        segment a folder
+
+        parameters
+        ----------
+        folder: string
+            path to folder to be segmented
 
         dest: string
             predicted masks destination folder
@@ -152,15 +226,15 @@ class Segmenter:
         """
 
         print("segmenting..")
-        tsize_given = (tsize is not None)
-        if tsize_given:
-            if tsize < 1:
-                raise ValueError("'tsize' must be greater than 0")
-            else:
-                tile_h = tsize
-                tile_w = tsize
+        # create dataset
+        dataset = ImgSet(folder, assess)
+        dl = DataLoader(dataset=dataset, batch_size=batch_size, num_workers=2)
         
-        # create folder
+        # image dimensions
+        im_h = dataset.im_h
+        im_w = dataset.im_w
+
+        # create masks destination folder
         while dest[-1] == '/':
             dest = dest[:len(dest)-1]
         if not os.path.exists(dest):
@@ -168,51 +242,15 @@ class Segmenter:
         
         if assess:
             sum_dice = 0
-            sum_jaccard = 0
-        
-        self.model.eval()
-        tf_resize = Resize()
-        dl = DataLoader(dataset=dataset, batch_size=batch_size, num_workers=2)
-        for i, (images, masks, files_id) in enumerate(dl):
-            # check dimensions
-            im_h = images[0].shape[1]
-            im_w = images[0].shape[2]
-            if not tsize_given:
-                tile_h = im_h
-                tile_w = im_w
-            if (im_h % tile_h) != 0 or (im_w % tile_w) != 0:
-                raise ValueError("the tile size must divide the image dimensions")
+            sum_jaccard = 0        
             
-            # compute masks using tiles
-            masks_p = torch.zeros((batch_size, 2, im_h, im_w), dtype=torch.float32)
-            i_h = 0
-            for j in range(im_h // tile_h):
-                i_w = 0
-                for k in range(im_w // tile_w):
-                    tiles = images[:, :, i_h:(i_h+tile_h), i_w:(i_w+tile_w)]
-                    preds = self.predict(tiles)
-                    
-                    for l in range(len(preds)):
-                        mask = preds[l].cpu()
-                        
-                        # resize if necessary
-                        if mask.shape != (2, tile_h, tile_w):
-                            mask = tf_resize(mask, (tile_w, tile_h))
-                        
-                        # write mask tile
-                        masks_p[l, :, i_h:(i_h+tile_h), i_w:(i_w+tile_w)] = mask
-                    i_w += tile_w
-                i_h += tile_h
+            for i, (images, masks, files_id) in enumerate(dl):
+                # compute predicted masks
+                masks_p = self.segment_core(images, tsize, transform)
             
-            for j in range(len(images)):
-                image = images[j]
-                mask_p = masks_p[j]
-                
-                # post-processing
-                if transform is not None:
-                    mask_p = transform(mask_p)
-
-                if assess:
+                for j in range(images.shape[0]):
+                    image = images[j]
+                    mask_p = masks_p[j]
                     mask = masks[j]
 
                     # metrics
@@ -249,29 +287,37 @@ class Segmenter:
                                           mask, sep, 
                                           mask_p), axis=1)
                     cv2.imwrite(dest + "/seg" + str(i+1) + ".jpg", img)
-                else:
-                    # convert tensor to numpy
-                    mask_p = mask_p.permute(1, 2, 0).numpy()
-                    
-                    # select foreground channel
-                    mask_p = mask_p[:, :, 1].reshape(im_h, im_w, 1)*255
-                    
-                    # convert to RGB image
-                    mask_p = np.concatenate((mask_p, mask_p, mask_p), axis=2)
-                    
-                    # write final image
-                    cv2.imwrite(dest  + "/" + files_id[j] + "_y.jpg", mask_p)
 
-                # display info
-                if assess:
+                    # display info
                     print("segmentation: " + str(i+1) + "/" + str(len(dataset))
                           + ", avg_dice: " + str(round(sum_dice/(i+1), 4))
                           + ", avg_jaccard: " + str(round(sum_jaccard/(i+1), 4))
                           , end='\r')
-                else:
-                    print(f'segmentation: {(i+1)}/{len(dataset)}', end='\r')
-        print("\nsegmentation done")
 
+        else:
+            for i, (images, files_id) in enumerate(dl):
+                # compute predicted masks
+                masks = self.segment_core(images, tsize, transform)
+
+                for j in range(masks.shape[0]):
+                    mask = masks[j]
+
+                    # convert tensor to numpy
+                    mask = mask.permute(1, 2, 0).numpy()
+                    
+                    # select foreground channel
+                    mask = mask[:, :, 1].reshape(im_h, im_w, 1)*255
+                    
+                    # convert to RGB image
+                    mask = np.concatenate((mask, mask, mask), axis=2)
+                    
+                    # write final image
+                    cv2.imwrite(dest  + "/" + files_id[j] + "_y.jpg", mask)
+    
+                    # display info
+                    print(f'segmentation: {(i+1)}/{len(dataset)}', end='\r')
+        
+        print("\nsegmentation done")
 
     def iter_data_imp(self, folder, n_iters, n_epochs, transform=None):
         """
@@ -311,8 +357,8 @@ class Segmenter:
         
         # improve the data
         for i in range(n_iters):
-            self.train(ImgSet(dest), n_epochs)
-            self.segment(ImgSet(dest), dest=dest, transform=transform)
+            self.train(dest, n_epochs)
+            self.segment_folder(dest, dest=dest, transform=transform)
             
             # merge ground truth masks with predicted masks
             for y_file in y_files:
@@ -420,10 +466,13 @@ class Segmenter:
         else:
             raise ValueError("invalid slide type: " + str(slide_type))
 
+        # inits
         count = 0
         self.set_eval()
         locator = SemanticLocator(background=0)
         tile_polygons, tile_ids = list(), list()
+
+        # compute mask polygons
         dl = DataLoader(dataset=dataset, batch_size=batch_size)
         for x, ids in dl:
             # convert to from RGB to BGR tensors
@@ -454,7 +503,7 @@ class Segmenter:
             count += x.shape[0]
             print(f'processed tiles {count}/{len(dataset)}')
         
-        # merge polygon overlapping several tiles
+        # merge polygons overlapping several tiles
         print("merging polygons..")
         merged = SemanticMerger(tolerance=1).merge(tile_ids, tile_polygons,
                                 dataset.topology)
@@ -516,7 +565,10 @@ class ImgSet(Dataset):
         # define dataset image size
         self.im_h = None
         self.im_w = None
-        (x, _, _) = self.__getitem__(0)
+        if self.masks:
+            (x, _, _) = self.__getitem__(0)
+        else:
+            (x, _) = self.__getitem__(0)
         self.im_h = x.shape[1]
         self.im_w = x.shape[2]
     
@@ -551,7 +603,7 @@ class ImgSet(Dataset):
             y = torch.from_numpy(y).float().permute(2, 0, 1)
             return x, y, file_id
         else:
-            return x, x, file_id
+            return x, file_id
 
     def __len__(self):
         return len(self.files)
@@ -603,7 +655,9 @@ class SldcDataset(Dataset):
         return self._topology
 
     def __getitem__(self, index):
-        """Return (numpy image of a tile, tile identifier)"""
+        """
+        returns (numpy image of a tile, tile identifier)
+        """
         identifier = index + 1
         tile_np = self._topology.tile(identifier).np_image
         

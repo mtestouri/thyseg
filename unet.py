@@ -1,5 +1,5 @@
 import sys
-from segmenter import Segmenter
+from segmenter import Segmenter, ImgSet
 from transforms import Resize, Threshold, Normalize, Smoothing, ErodeDilate
 from metrics import dice
 import torch
@@ -81,14 +81,14 @@ class UnetSegmenter(Segmenter):
             raise ValueError("'n_classes' must be greater than 1")
         self.model = Unet(init_depth, n_classes).to(self.device)
 
-    def train(self, dataset, n_epochs):
+    def train(self, folder, n_epochs):
         """
         train the model
 
         parameters
         ----------
-        dataset: ImgSet
-            training set
+        folder: string
+            path to the training set folder
 
         n_epochs: int
             number of training epochs
@@ -97,18 +97,21 @@ class UnetSegmenter(Segmenter):
         print("training the model..")
         if n_epochs < 1:
             raise ValueError("'n_epochs' must be greater than 0")
-        
+
         # training parameters
         batch_size = 1
         learning_rate = 0.0001
         criterion = SegLoss(self.c_weights) # custom loss
         optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
         
-        # train loop
+        # inits
+        dataset = ImgSet(folder)
+        n_iterations = math.ceil(len(dataset)/batch_size)
         self.model.train()
         tf_resize = Resize()
+
+        # training loop
         dl = DataLoader(dataset=dataset, batch_size=batch_size, num_workers=2)
-        n_iterations = math.ceil(len(dataset)/batch_size)
         for epoch in range(n_epochs):
             print('')
             

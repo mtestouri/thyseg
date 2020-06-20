@@ -1,10 +1,8 @@
 import sys
 import argparse
 import numpy as np
-from segmenter import ImgSet
 from unet import UnetSegmenter, seg_postprocess, idi_postprocess
 from cytomine import CytomineJob, Cytomine
-import json
 
 
 if __name__ == "__main__":
@@ -33,7 +31,7 @@ if __name__ == "__main__":
     parser.add_argument('-w', metavar='win', nargs='+', default=[],
                         help='wsi windows in the form : [x,y,width,height]')
     parser.add_argument('-cs', action='store_true',
-                        help='flag for CytomineSlide instead of OpenSlide')
+                        help='flag to use CytomineSlide instead of OpenSlide')
     parser.add_argument('-a', action='store_true',
                         help='flag for model assessment')
     parser.add_argument('m', metavar='mode',
@@ -59,7 +57,7 @@ if __name__ == "__main__":
         segmenter = UnetSegmenter(args.depth)
         if args.load is not None:
             segmenter.load_model(args.load)
-        segmenter.train(ImgSet(args.d), args.epochs)
+        segmenter.train(args.d, args.epochs)
         if args.save is not None:
             segmenter.save_model(args.save)
     
@@ -71,9 +69,9 @@ if __name__ == "__main__":
         if args.load is not None:
             segmenter.load_model(args.load)
         if args.d:
-            segmenter.segment(ImgSet(args.d, masks=args.a), dest=args.dest, 
-                              tsize=args.tsize, assess=args.a, 
-                              transform=seg_postprocess(args.thresh))
+            segmenter.segment_folder(args.d, dest=args.dest, 
+                                     tsize=args.tsize, assess=args.a, 
+                                     transform=seg_postprocess(args.thresh))
         if args.i:
             # check windows
             windows = list()
