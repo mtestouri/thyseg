@@ -31,7 +31,9 @@ if __name__ == "__main__":
     parser.add_argument('-i', metavar='id', type=int, nargs='+',
                         help='cytomine wsi identifiers')
     parser.add_argument('-w', metavar='win', nargs='+', default=[],
-                        help='wsi windows : [x,y,width,height ...]')
+                        help='wsi windows in the form : [x,y,width,height]')
+    parser.add_argument('-cs', action='store_true',
+                        help='flag for CytomineSlide instead of OpenSlide')
     parser.add_argument('-a', action='store_true',
                         help='flag for model assessment')
     parser.add_argument('m', metavar='mode',
@@ -85,7 +87,13 @@ if __name__ == "__main__":
                 windows.append(window)
             windows = np.array(windows, dtype=np.int)
 
-            cy = json.load(open('cytomine.json'))
+            # slide type
+            if args.cs:
+                slide_type = 'cytomineslide'
+            else:
+                slide_type = 'openslide'
+
+            # create Cytomine context
             #with Cytomine(host=args.host,
             #              public_key=args.public_key,
             #              private_key=args.private_key) as conn:
@@ -94,8 +102,18 @@ if __name__ == "__main__":
                              private_key=args.private_key,
                              software_id=args.cytomine_id_software,
                              project_id=args.cytomine_id_project) as job:
-                segmenter.segment_r(args.i, windows, tsize=args.tsize,
-                                    transform=seg_postprocess(args.thresh))
+                
+                # remote segmentation
+                for image_id in args.i:
+                    if len(windows) > 0:
+                        for window in windows:
+                            segmenter.segment_wsi(image_id, window, args.tsize,
+                                        transform=seg_postprocess(args.thresh),
+                                        slide_type=slide_type)
+                    else:
+                        segmenter.segment_wsi(image_id, [], args.tsize, 
+                                        transform=seg_postprocess(args.thresh),
+                                        slide_type=slide_type)
     
     elif args.m == 'improve':
         if args.d is None:

@@ -12,11 +12,13 @@ from transforms import Resize
 from cytomine.models import ImageInstance, Annotation, AnnotationCollection
 from shapely.affinity import affine_transform
 from sldc import TileTopology, SemanticLocator, SemanticMerger
-from sldc_cytomine import CytomineSlide, CytomineTileBuilder, CytomineTile
+from sldc_cytomine import CytomineSlide, CytomineTileBuilder
+from sldc_openslide import OpenSlideImage, OpenSlideTileBuilder
 
 
-FOREGROUND = 154005477
-SIMPLIFY_TOLERANCE = 4
+FOREGROUND = 154005477  # foreground term id
+SIMPLIFY_TOLERANCE = 4  # tolerance for polygons simplification
+CACHE = "__cache__"     # path were the images are cached
 
 
 class Segmenter:
@@ -324,37 +326,8 @@ class Segmenter:
                 y_pred = cv2.bitwise_or(y, y_pred)
                 cv2.imwrite(dest  + "/" + y_file[len(folder)+1:], y_pred)
 
-    def segment_r(self, image_ids, windows=[], tsize=512, batch_size=4, transform=None):
-        """
-        remote segmentation of WSIs
-
-        parameters
-        ----------
-        image_ids: int array
-            ids of WSIs to segment
-
-        windows: array of int array
-            the windows where to perform the segmentations, windows are in 
-            the form : [off_x, off_y, width, height]
-
-        tsize: int
-            tile size
-
-        batch_size: int
-            batch size
-
-        transform: Transform
-            transform to apply to the predicted masks
-        """
-
-        for image_id in image_ids:
-            if len(windows) > 0:
-                for window in windows:
-                    self.segment_wsi(image_id, window, tsize, batch_size, transform)
-            else:
-                self.segment_wsi(image_id, [], tsize, batch_size, transform)
-
-    def segment_wsi(self, image_id, window=[], tsize=512, batch_size=4, transform=None):
+    def segment_wsi(self, image_id, window=[], tsize=512, batch_size=4, 
+                    transform=None, slide_type='openslide'):
         """
         remote segmentation of a WSI
 
@@ -375,36 +348,83 @@ class Segmenter:
 
         transform: Transform
             transform to apply to the predicted masks
+
+        slide_type: string
+            slide type : 'openslide' or 'cytomineslide'
         """
-        
-        # overlap between tiles
-        overlap = int(round(tsize / 4))
-        
-        # fetch wsi
+
+        # fetch wsi instance
         image_instance = ImageInstance().fetch(image_id)
 
-        # create window
+        # window parameters
         if len(window) == 4:
             off_x = window[0]
             off_y = window[1]
             w_width = window[2]
             w_height = window[3]
-            wsi = CytomineSlide(image_id).window(
-                (off_x, image_instance.height - off_y - w_height), w_width, w_height)
+            complete = False
         else:
             off_x = 0
             off_y = 0
+            w_width = image_instance.width
             w_height = image_instance.height
-            wsi = CytomineSlide(image_id)
+            complete = True
+
+        # overlap between tiles
+        overlap = int(round(tsize / 4))
+
+        # create OpenSlide image
+        if slide_type == 'openslide':
+            # image file
+            img_file = (CACHE + "/"
+                        + str(image_instance.id) + "-"
+                        + str(off_x) + "-"
+                        + str(image_instance.height - off_y - w_height) + "-"
+                        + str(w_width) + "-"
+                        + str(w_height)
+                        + ".jpg")
+            
+            # create cache folder
+            if not os.path.exists(CACHE):
+                os.makedirs(CACHE)
+
+            # download image file if necessary
+            if not os.path.isfile(img_file):
+                if complete:
+                    image_instance.download(dest_pattern=img_file)
+                else:
+                    image_instance.window(off_x, image_instance.height - off_y
+                                          - w_height, w_width, w_height, 
+                                          dest_pattern=img_file)
         
-        # dataset
-        dataset = SldcDataset(wsi, tsize, tsize, overlap)
-        dl = DataLoader(dataset=dataset, batch_size=batch_size)
+            # create slide image
+            wsi = OpenSlideImage(img_file)
+            if (wsi.width != w_width) or (wsi.height != w_height):
+                raise ValueError("invalid image dimensions: expected " 
+                                 + str((w_width, w_height)) + ", got "
+                                 + str((wsi.width, wsi.height)))
+            # create dataset
+            dataset = SldcDataset(wsi, tsize, tsize, overlap, 'openslide')
+
+        # create CytomineSlide image
+        elif slide_type == 'cytomineslide':
+            # create slide image
+            if complete:
+                wsi = CytomineSlide(image_id)
+            else:
+                wsi = CytomineSlide(image_id).window((off_x, 
+                    image_instance.height - off_y - w_height), w_width, w_height)
+            # create dataset
+            dataset = SldcDataset(wsi, tsize, tsize, overlap, 'cytomineslide')
+            
+        else:
+            raise ValueError("invalid slide type: " + str(slide_type))
 
         count = 0
         self.set_eval()
         locator = SemanticLocator(background=0)
         tile_polygons, tile_ids = list(), list()
+        dl = DataLoader(dataset=dataset, batch_size=batch_size)
         for x, ids in dl:
             # convert to from RGB to BGR tensors
             x = x[:, :, :, [2, 1, 0]].permute(0, 3, 1, 2).float()                
@@ -543,8 +563,8 @@ class SldcDataset(Dataset):
 
     parameters
     ----------
-    wsi: CytomineSlide
-        CytomineSlide object
+    wsi: Image
+        OpenSlideImage or CytomineSlide object
         
     tile_width: int
         tile width
@@ -554,16 +574,26 @@ class SldcDataset(Dataset):
 
     overlap: int
         overlap between tiles
+
+    slide_type: string
+        slide type : 'openslide' or 'cytomineslide'
     """
     
-    def __init__(self, wsi, tile_width, tile_height, overlap):
+    def __init__(self, wsi, tile_width, tile_height, overlap, slide_type):
+        # tile builder
+        if slide_type == 'openslide':
+            tile_builder =  OpenSlideTileBuilder()
+        elif slide_type == 'cytomineslide':
+            tile_builder = CytomineTileBuilder(CACHE)
+        else:
+            raise ValueError("invalid slide type: " + str(slide_type))
+        
         self._wsi = wsi
-        topology = TileTopology(
-            image=wsi, tile_builder=CytomineTileBuilder('__cache__'),
+        self._topology = TileTopology(
+            image=wsi, tile_builder=tile_builder,
             max_width=tile_width, max_height=tile_height,
             overlap=overlap
         )
-        self._topology = topology
         self._tile_width = tile_width
         self._tile_height = tile_height
         self._overlap = overlap
@@ -575,19 +605,21 @@ class SldcDataset(Dataset):
     def __getitem__(self, index):
         """Return (numpy image of a tile, tile identifier)"""
         identifier = index + 1
-        tile = self._topology.tile(identifier)
+        tile_np = self._topology.tile(identifier).np_image
         
-        # check if the tile is complete
-        if skip_tile(identifier, self.topology):
-            off_x = tile.offset_x - (self._tile_width - tile.width)
-            off_y = tile.offset_y - (self._tile_height - tile.height)
-            offset = (off_x, off_y)
-            
-            # remplace the incomplete tile with a complete one
-            tile = CytomineTile(tile._working_path, tile._parent, offset, 
-                                self._tile_width, self._tile_height)
-        
-        return tile.np_image, identifier
+        # right padding
+        if tile_np.shape[0] != self._tile_width:
+            pad = np.zeros((self._tile_width - tile_np.shape[0], 
+                            tile_np.shape[1], tile_np.shape[2]), dtype=np.uint8)
+            tile_np = np.concatenate((tile_np, pad), axis=0)
+
+        # bottom padding
+        if tile_np.shape[1] != self._tile_height:
+            pad = np.zeros((tile_np.shape[0], self._tile_height - tile_np.shape[1], 
+                            tile_np.shape[2]), dtype=np.uint8)
+            tile_np = np.concatenate((tile_np, pad), axis=1)
+
+        return tile_np, identifier
 
     def __len__(self):
         return self.topology.tile_count
