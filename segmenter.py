@@ -33,15 +33,15 @@ class Segmenter:
     
     def __init__(self, c_weights=None):
         if torch.cuda.is_available():
-            self.device = torch.device('cuda')
+            self._device = torch.device('cuda')
         else:
-            self.device = torch.device('cpu')
-        self.model = None
-        self.c_weights = c_weights
+            self._device = torch.device('cpu')
+        self._model = None
+        self._c_weights = c_weights
 
     def check_model_init(self):
-        if self.model is None:
-            raise ValueError("variable 'self.model' not initialized")
+        if self._model is None:
+            raise ValueError("variable 'self._model' not initialized")
 
     def save_model(self, model_file):
         """
@@ -54,7 +54,7 @@ class Segmenter:
         """
 
         self.check_model_init()
-        torch.save(self.model.state_dict(), model_file)
+        torch.save(self._model.state_dict(), model_file)
 
     def load_model(self, model_file):
         """
@@ -68,19 +68,19 @@ class Segmenter:
         """
 
         self.check_model_init()
-        self.model.load_state_dict(torch.load(model_file))
+        self._model.load_state_dict(torch.load(model_file))
 
     def set_eval(self):
         """
         set the model in evaluation mode
         """
-        self.model.eval()
+        self._model.eval()
 
     def set_train(self):
         """
         set the model in training mode
         """
-        self.model.train()
+        self._model.train()
 
     def train(self, dataset, n_epochs):
         raise NotImplementedError
@@ -105,22 +105,22 @@ class Segmenter:
 
         self.check_model_init()
         # check eval mode
-        train_mode = self.model.training
+        train_mode = self._model.training
         if train_mode:
-            self.model.eval()
+            self._model.eval()
         
         with torch.no_grad():
             # compute masks
-            masks = torch.sigmoid(self.model(images.to(self.device)))
+            masks = torch.sigmoid(self._model(images.to(self._device)))
         
             # post-processing
             if transform is not None:
                 for i in range(len(masks)):
-                    masks[i] = transform(masks[i].cpu()).to(self.device)
+                    masks[i] = transform(masks[i].cpu()).to(self._device)
             
         # optionally restore train mode
         if train_mode:
-            self.model.train()
+            self._model.train()
         
         return masks
 
@@ -256,8 +256,8 @@ class Segmenter:
                     # metrics
                     mask = mask.unsqueeze(0)
                     mask_p = mask_p.unsqueeze(0)
-                    sum_dice += dice(mask_p, mask, self.c_weights).item()
-                    sum_jaccard += jaccard(mask_p, mask, self.c_weights).item()
+                    sum_dice += dice(mask_p, mask, self._c_weights).item()
+                    sum_jaccard += jaccard(mask_p, mask, self._c_weights).item()
                     mask = mask.squeeze(0)
                     mask_p = mask_p.squeeze(0)
                     
@@ -383,8 +383,9 @@ class Segmenter:
             id of the WSI to segment
 
         windows: int array
-            the window where to perform the segmentation, the window is in 
-            the form : [off_x, off_y, width, height]
+            the window where to perform the segmentation, the window is in  
+            the form : [off_x, off_y, width, height] and the origin is the lower 
+            left corner
 
         tsize: int
             tile size
@@ -554,18 +555,18 @@ class ImgSet(Dataset):
     def __init__(self, folder, masks=True):
         while folder[-1] == '/':
             folder = folder[:len(folder)-1]
-        self.df = folder
-        self.masks = masks
+        self._df = folder
+        self._masks = masks
         
         # load list of files
-        self.files = glob(self.df + "/*_x.jpg")
-        if len(self.files) == 0:
-            raise FileNotFoundError("no files found in folder '" + self.df + "'")
+        self._files = glob(self._df + "/*_x.jpg")
+        if len(self._files) == 0:
+            raise FileNotFoundError("no files found in folder '" + self._df + "'")
         
         # define dataset image size
         self.im_h = None
         self.im_w = None
-        if self.masks:
+        if self._masks:
             (x, _, _) = self.__getitem__(0)
         else:
             (x, _) = self.__getitem__(0)
@@ -574,13 +575,13 @@ class ImgSet(Dataset):
     
     def __getitem__(self, index):
         # load image
-        x_file = self.files[index]
-        file_id = x_file[len(self.df)+1:len(x_file)-6]
+        x_file = self._files[index]
+        file_id = x_file[len(self._df)+1:len(x_file)-6]
         x = cv2.imread(x_file)
         
         # load mask
-        if self.masks:
-            y_file = self.df + "/" + file_id + "_y.jpg"
+        if self._masks:
+            y_file = self._df + "/" + file_id + "_y.jpg"
             y = cv2.imread(y_file)
             if y is None:
                 raise FileNotFoundError("unable to load '" + y_file + "'")
@@ -589,14 +590,14 @@ class ImgSet(Dataset):
         if (self.im_h is not None) and (self.im_w is not None):
             if (x.shape[0] != self.im_h) or (x.shape[1] != self.im_w):
                 x = cv2.resize(x, (self.im_w, self.im_h), cv2.INTER_LINEAR)
-            if self.masks:
+            if self._masks:
                 if (y.shape[0] != self.im_h) or (y.shape[1] != self.im_w):
                     y = cv2.resize(y, (self.im_w, self.im_h), cv2.INTER_LINEAR) 
         
         # convert to tensor
         x = torch.from_numpy(x).float().permute(2, 0, 1)
         
-        if self.masks:
+        if self._masks:
             # RGB masks to classe masks
             y = np.abs(np.round(y/255)[:, :, :2] - (1, 0))
             # convert to tensor
@@ -606,7 +607,7 @@ class ImgSet(Dataset):
             return x, file_id
 
     def __len__(self):
-        return len(self.files)
+        return len(self._files)
 
 
 class SldcDataset(Dataset):

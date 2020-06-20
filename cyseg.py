@@ -29,7 +29,8 @@ if __name__ == "__main__":
     parser.add_argument('-i', metavar='id', type=int, nargs='+',
                         help='cytomine wsi identifiers')
     parser.add_argument('-w', metavar='win', nargs='+', default=[],
-                        help='wsi windows in the form : [x,y,width,height]')
+                        help='wsi windows in the form : [off_x,off_y,width,height]'
+                             + ' and the origin is the lower left corner')
     parser.add_argument('-cs', action='store_true',
                         help='flag to use CytomineSlide instead of OpenSlide')
     parser.add_argument('-a', action='store_true',

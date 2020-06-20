@@ -48,11 +48,11 @@ class SegLoss(nn.Module):
     """
     def __init__(self, c_weights=None):
         super().__init__()
-        self.bce_loss = nn.BCEWithLogitsLoss()
-        self.c_weights = c_weights
+        self._bce_loss = nn.BCEWithLogitsLoss()
+        self._c_weights = c_weights
 
     def forward(self, y_pred, y):
-        return self.bce_loss(y_pred, y) + dice_loss(y_pred, y, self.c_weights)
+        return self._bce_loss(y_pred, y) + dice_loss(y_pred, y, self._c_weights)
 
 
 class UnetSegmenter(Segmenter):
@@ -79,7 +79,7 @@ class UnetSegmenter(Segmenter):
             raise ValueError("'init_depth' must be greater than 0")
         if n_classes < 2:
             raise ValueError("'n_classes' must be greater than 1")
-        self.model = Unet(init_depth, n_classes).to(self.device)
+        self._model = Unet(init_depth, n_classes).to(self._device)
 
     def train(self, folder, n_epochs):
         """
@@ -101,13 +101,13 @@ class UnetSegmenter(Segmenter):
         # training parameters
         batch_size = 1
         learning_rate = 0.0001
-        criterion = SegLoss(self.c_weights) # custom loss
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
+        criterion = SegLoss(self._c_weights) # custom loss
+        optimizer = torch.optim.Adam(self._model.parameters(), lr=learning_rate)
         
         # inits
         dataset = ImgSet(folder)
         n_iterations = math.ceil(len(dataset)/batch_size)
-        self.model.train()
+        self._model.train()
         tf_resize = Resize()
 
         # training loop
@@ -119,15 +119,15 @@ class UnetSegmenter(Segmenter):
             sum_dice = 0
             for i, (x, y, _) in enumerate(dl):
                 # batch
-                x = x.to(self.device)
-                y = y.to(self.device)
+                x = x.to(self._device)
+                y = y.to(self._device)
                 
                 # forward pass
-                y_pred = self.model(x)
+                y_pred = self._model(x)
                 if y_pred.shape != y.shape:
                     for j in range(y.shape[0]):
                         y[j] = tf_resize(y[j].cpu(), (y_pred.shape[2],
-                                         y_pred.shape[3])).to(self.device)
+                                         y_pred.shape[3])).to(self._device)
                 loss = criterion(y_pred, y)
                 sum_loss += loss.item()
                 sum_dice += dice_loss(y_pred, y).item() # compute dice loss

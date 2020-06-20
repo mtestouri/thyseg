@@ -28,7 +28,7 @@ class Smoothing:
     def __init__(self, ksize=10):
         if ksize < 1:
             raise ValueError("'ksize' must be greater or equal to 1")
-        self.ksize = ksize
+        self._ksize = ksize
 
     def __call__(self, image):
         """
@@ -46,7 +46,7 @@ class Smoothing:
         """
 
         image = image.permute(1, 2, 0).numpy()
-        image = cv2.blur(image, (self.ksize, self.ksize))
+        image = cv2.blur(image, (self._ksize, self._ksize))
         return torch.from_numpy(image).permute(2, 0, 1)
 
 
@@ -56,8 +56,8 @@ class ErodeDilate:
             raise ValueError("'n_iters' must be greater or equal to 1")
         if ksize < 1:
             raise ValueError("'ksize' must be greater or equal to 1")
-        self.n_iters = n_iters
-        self.kernel = np.ones((ksize, ksize), np.uint8)
+        self._n_iters = n_iters
+        self._kernel = np.ones((ksize, ksize), np.uint8)
     
     def __call__(self, image):
         """
@@ -75,8 +75,8 @@ class ErodeDilate:
         """
 
         image = image.permute(1, 2, 0).numpy()
-        image = cv2.erode(image, self.kernel, iterations=self.n_iters)
-        image = cv2.dilate(image, self.kernel, iterations=self.n_iters)
+        image = cv2.erode(image, self._kernel, iterations=self._n_iters)
+        image = cv2.dilate(image, self._kernel, iterations=self._n_iters)
         return torch.from_numpy(image).permute(2, 0, 1)
 
 
@@ -84,7 +84,7 @@ class Threshold:
     def __init__(self, thresh=0.5):
         if thresh < 0 or thresh > 1:
             raise ValueError("'thresh' must belong to [0,1]")
-        self.thresh = thresh
+        self._thresh = thresh
 
     def __call__(self, image):
         """
@@ -102,7 +102,7 @@ class Threshold:
         """
 
         image = image.permute(1, 2, 0).numpy()
-        _, image = cv2.threshold(image, self.thresh, 1, cv2.THRESH_BINARY)
+        _, image = cv2.threshold(image, self._thresh, 1, cv2.THRESH_BINARY)
         return torch.from_numpy(image).permute(2, 0, 1)
 
 
