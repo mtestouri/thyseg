@@ -451,7 +451,7 @@ class Segmenter:
                                  + str((w_width, w_height)) + ", got "
                                  + str((wsi.width, wsi.height)))
             # create dataset
-            dataset = SldcDataset(wsi, tsize, tsize, overlap, 'openslide')
+            dataset = TileDataset(wsi, tsize, tsize, overlap, 'openslide')
 
         # create CytomineSlide image
         elif slide_type == 'cytomineslide':
@@ -462,7 +462,7 @@ class Segmenter:
                 wsi = CytomineSlide(image_id).window((off_x, 
                     image_instance.height - off_y - w_height), w_width, w_height)
             # create dataset
-            dataset = SldcDataset(wsi, tsize, tsize, overlap, 'cytomineslide')
+            dataset = TileDataset(wsi, tsize, tsize, overlap, 'cytomineslide')
             
         else:
             raise ValueError("invalid slide type: " + str(slide_type))
@@ -507,7 +507,7 @@ class Segmenter:
         # merge polygons overlapping several tiles
         print("merging polygons..")
         merged = SemanticMerger(tolerance=1).merge(tile_ids, tile_polygons,
-                                dataset.topology)
+                                                   dataset.topology)
         
         # upload to cytomine
         print("uploading annotations..")
@@ -617,9 +617,9 @@ class ImgSet(Dataset):
         return len(self._files)
 
 
-class SldcDataset(Dataset):
+class TileDataset(Dataset):
     """
-    SLDC dataset
+    SLDC tile dataset
 
     parameters
     ----------
