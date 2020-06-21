@@ -39,7 +39,7 @@ class Segmenter:
         self._model = None
         self._c_weights = c_weights
 
-    def check_model_init(self):
+    def _check_model_init(self):
         if self._model is None:
             raise ValueError("variable 'self._model' not initialized")
 
@@ -53,7 +53,7 @@ class Segmenter:
             file where the model is saved
         """
 
-        self.check_model_init()
+        self._check_model_init()
         torch.save(self._model.state_dict(), model_file)
 
     def load_model(self, model_file):
@@ -67,7 +67,7 @@ class Segmenter:
             beware that the depth of the segmenter and the model file must match
         """
 
-        self.check_model_init()
+        self._check_model_init()
         self._model.load_state_dict(torch.load(model_file))
 
     def set_eval(self):
@@ -103,7 +103,7 @@ class Segmenter:
             masks tensor of shape: (batch_size, n_channels, height, width)
         """
 
-        self.check_model_init()
+        self._check_model_init()
         # check eval mode
         train_mode = self._model.training
         if train_mode:
@@ -124,7 +124,7 @@ class Segmenter:
         
         return masks
 
-    def segment_core(self, images, tsize=None, transform=None):
+    def _segment_core(self, images, tsize=None, transform=None):
         """
         segment a batch of images using tiles
 
@@ -246,7 +246,7 @@ class Segmenter:
             
             for i, (images, masks, files_id) in enumerate(dl):
                 # compute predicted masks
-                masks_p = self.segment_core(images, tsize, transform)
+                masks_p = self._segment_core(images, tsize, transform)
             
                 for j in range(images.shape[0]):
                     image = images[j]
@@ -297,7 +297,7 @@ class Segmenter:
         else:
             for i, (images, files_id) in enumerate(dl):
                 # compute predicted masks
-                masks = self.segment_core(images, tsize, transform)
+                masks = self._segment_core(images, tsize, transform)
 
                 for j in range(masks.shape[0]):
                     mask = masks[j]
@@ -515,7 +515,8 @@ class Segmenter:
         for polygon in merged:
             anns.append(
                 Annotation(
-                location=change_referential(polygon, off_x, off_y, w_height).wkt,
+                location=self._change_referential(polygon, 
+                                                  off_x, off_y, w_height).wkt,
                 id_image=image_instance.id,
                 id_project=image_instance.project,
                 term=[FOREGROUND]
@@ -523,19 +524,17 @@ class Segmenter:
             )
         anns.save(n_workers=4)
 
+    def _change_referential(self, p, off_x, off_y, w_height):
+        return affine_transform(p, [1, 0, 0, -1, off_x, off_y + w_height])
 
-def change_referential(p, off_x, off_y, w_height):
-    return affine_transform(p, [1, 0, 0, -1, off_x, off_y + w_height])
-
-
-def skip_tile(tile_id, topology):
-    tile_row, tile_col = topology._tile_coord(tile_id)
-    skip_bottom = (topology._image.height 
-                   % (topology._max_height - topology._overlap)) != 0
-    skip_right = (topology._image.width 
-                  % (topology._max_width - topology._overlap)) != 0
-    return (skip_bottom and tile_row == topology.tile_vertical_count - 1) or \
-           (skip_right and tile_col == topology.tile_horizontal_count - 1)
+    def _skip_tile(self, tile_id, topology):
+        tile_row, tile_col = topology._tile_coord(tile_id)
+        skip_bottom = (topology._image.height 
+                       % (topology._max_height - topology._overlap)) != 0
+        skip_right = (topology._image.width 
+                      % (topology._max_width - topology._overlap)) != 0
+        return (skip_bottom and tile_row == topology.tile_vertical_count - 1) or \
+               (skip_right and tile_col == topology.tile_horizontal_count - 1)
 
 
 class ImgSet(Dataset):
@@ -564,14 +563,22 @@ class ImgSet(Dataset):
             raise FileNotFoundError("no files found in folder '" + self._df + "'")
         
         # define dataset image size
-        self.im_h = None
-        self.im_w = None
+        self._im_h = None
+        self._im_w = None
         if self._masks:
             (x, _, _) = self.__getitem__(0)
         else:
             (x, _) = self.__getitem__(0)
-        self.im_h = x.shape[1]
-        self.im_w = x.shape[2]
+        self._im_h = x.shape[1]
+        self._im_w = x.shape[2]
+
+    @property
+    def im_h(self):
+        return self._im_h
+
+    @property
+    def im_w(self):
+        return self._im_w
     
     def __getitem__(self, index):
         # load image
@@ -587,12 +594,12 @@ class ImgSet(Dataset):
                 raise FileNotFoundError("unable to load '" + y_file + "'")
         
         # check size
-        if (self.im_h is not None) and (self.im_w is not None):
-            if (x.shape[0] != self.im_h) or (x.shape[1] != self.im_w):
-                x = cv2.resize(x, (self.im_w, self.im_h), cv2.INTER_LINEAR)
+        if (self._im_h is not None) and (self._im_w is not None):
+            if (x.shape[0] != self._im_h) or (x.shape[1] != self._im_w):
+                x = cv2.resize(x, (self._im_w, self._im_h), cv2.INTER_LINEAR)
             if self._masks:
-                if (y.shape[0] != self.im_h) or (y.shape[1] != self.im_w):
-                    y = cv2.resize(y, (self.im_w, self.im_h), cv2.INTER_LINEAR) 
+                if (y.shape[0] != self._im_h) or (y.shape[1] != self._im_w):
+                    y = cv2.resize(y, (self._im_w, self._im_h), cv2.INTER_LINEAR) 
         
         # convert to tensor
         x = torch.from_numpy(x).float().permute(2, 0, 1)
