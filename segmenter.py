@@ -418,7 +418,7 @@ class Segmenter:
         windows: int array
             the window of the WSI to use
             the window is in the form : [off_x, off_y, width, height] and 
-            the origin is the lower left corner
+            the origin is the top left corner
 
         tsize: int
             tile size
@@ -457,11 +457,8 @@ class Segmenter:
             # image file
             img_file = (CACHE + "/"
                         + str(image_instance.id) + "-"
-                        + str(off_x) + "-"
-                        + str(image_instance.height - off_y - w_height) + "-"
-                        + str(w_width) + "-"
-                        + str(w_height)
-                        + ".jpg")
+                        + str(off_x) + "-" + str(off_y) + "-"
+                        + str(w_width) + "-" + str(w_height) + ".jpg")
             
             # create cache folder
             if not os.path.exists(CACHE):
@@ -472,10 +469,9 @@ class Segmenter:
                 if complete:
                     image_instance.download(dest_pattern=img_file)
                 else:
-                    image_instance.window(off_x, image_instance.height - off_y
-                                          - w_height, w_width, w_height, 
+                    image_instance.window(off_x, off_y, w_width, w_height, 
                                           dest_pattern=img_file)
-        
+            
             # create slide image
             wsi = OpenSlideImage(img_file)
             if (wsi.width != w_width) or (wsi.height != w_height):
@@ -502,7 +498,7 @@ class Segmenter:
         windows: int array
             the window where to perform the segmentation
             the window is in the form : [off_x, off_y, width, height] and 
-            the origin is the lower left corner
+            the origin is the top left corner
 
         tsize: int
             tile size
@@ -581,7 +577,7 @@ class Segmenter:
         windows: int array
             the window where to upload the annotations
             the window is in the form : [off_x, off_y, width, height] and 
-            the origin is the lower left corner
+            the origin is the top left corner
 
         polygons: iterable (size: m, subtype: shapely.geometry.Polygon)
             an iterable of polygons objects corresponding to the annotations
@@ -600,19 +596,17 @@ class Segmenter:
             if len(window) == 4:
                 off_x = window[0]
                 off_y = window[1]
-                w_height = window[3]
             else:
                 off_x = 0
                 off_y = 0
-                w_height = image_instance.height
 
             print("uploading annotations..")
             anns = AnnotationCollection()
             for polygon in polygons:
                 anns.append(
                     Annotation(
-                    location=_change_referential(polygon, off_x, off_y,
-                                                 w_height).wkt,
+                    location=_change_referential(polygon, off_x, off_y, 
+                                                 image_instance.height).wkt,
                     id_image=image_instance.id,
                     id_project=image_instance.project,
                     term=[FOREGROUND]
@@ -621,8 +615,8 @@ class Segmenter:
             anns.save(n_workers=4)
 
 
-def _change_referential(p, off_x, off_y, w_height):
-    return affine_transform(p, [1, 0, 0, -1, off_x, off_y + w_height])
+def _change_referential(p, off_x, off_y, height):
+    return affine_transform(p, [1, 0, 0, -1, off_x, height - off_y])
 
 
 class ImgSet(Dataset):

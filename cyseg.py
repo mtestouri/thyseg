@@ -29,8 +29,7 @@ if __name__ == "__main__":
     parser.add_argument('-i', metavar='id', type=int,
                         help='cytomine wsi id')
     parser.add_argument('-w', metavar='win', default=[],
-                        help='wsi window in the form : [off_x,off_y,width,height]'
-                             + ' and the origin is the lower left corner')
+                        help='wsi window in the form : [off_x,off_y,width,height]')
     parser.add_argument('-a', action='store_true',
                         help='flag for model assessment')
     parser.add_argument('m', metavar='mode',
