@@ -1,5 +1,5 @@
 import sys
-from segmenter import Segmenter, ImgSet
+from segmenter import Segmenter, ImgSet, SegmenterBuilder
 from transforms import Resize, Threshold, Normalize, Smoothing, ErodeDilate
 from metrics import dice
 import torch
@@ -248,3 +248,60 @@ class UpConvBlock(nn.Module):
 
         x = torch.cat([x, skip_x], dim=1)
         return F.relu(self.conv2(F.relu(self.conv1(x))))
+
+
+class UnetSegBuilder(SegmenterBuilder):
+    """
+    build a UnetSegmenter object
+
+    parameters
+    ----------
+    device: string
+        device to use for segmentation : 'cpu' or 'cuda'
+
+    init_depth: int
+        initial number of filters, the number of filters is doubled at each 
+        stages of the U-Net and thus this parameter controls the total 
+        number of filters in the network
+
+    n_classes: int
+        number of classes
+
+    c_weights: float array
+        class weights used for loss computation
+
+    model_file: string
+        model file to load
+    """
+
+    def __init__(self, device='cuda', init_depth=32, n_classes=2,
+                 c_weights=torch.Tensor([0, 1]), model_file=None):
+        self._device = device
+        self._init_depth = init_depth
+        self._n_classes = n_classes
+        self._c_weights = c_weights
+        self._model_file = model_file
+    
+    def build(self):
+        """
+        build a UnetSegmenter object
+
+        Returns
+        -------
+        segmenter: UnetSegmenter
+            the built UnetSegmenter object
+        """
+
+        # create segmenter
+        segmenter = UnetSegmenter(
+            self._device,
+            self._init_depth,
+            self._n_classes,
+            self._c_weights,
+        )
+        
+        # load model
+        if self._model_file is not None:
+            segmenter.load_model(self._model_file)
+
+        return segmenter

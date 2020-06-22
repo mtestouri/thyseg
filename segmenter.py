@@ -95,8 +95,7 @@ class Segmenter:
         parameters
         ----------
         model_file: string
-            model file to load\n
-            beware that the depth of the segmenter and the model file must match
+            model file to load
         """
 
         self._check_model_init()
@@ -764,3 +763,36 @@ class TileDataset(Dataset):
 
     def __len__(self):
         return self.topology.tile_count
+
+
+class SegmenterBuilder():
+    """
+    interface to be implemented to build specific segmenters
+
+    parameters
+    ----------
+    device: string
+        device to use for segmentation : 'cpu' or 'cuda'
+
+    c_weights: float array
+        class weights used for loss computation
+
+    model_file: string
+        model file to load
+    """
+
+    def __init__(self, device='cuda', c_weights=None, model_file=None):
+        self._device = device
+        self._c_weights = c_weights
+        self._model_file = model_file
+
+    def build(self):
+        """
+        build a Segmenter object
+
+        Returns
+        -------
+        segmenter: Segmenter
+            the built Segmenter object
+        """
+        raise NotImplementedError

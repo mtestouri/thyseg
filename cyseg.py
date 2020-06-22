@@ -1,7 +1,7 @@
 import sys
 import argparse
 import numpy as np
-from unet import UnetSegmenter, seg_postprocess, idi_postprocess
+from unet import UnetSegmenter, UnetSegBuilder, seg_postprocess, idi_postprocess
 from mpseg import mp_segment_wsi
 
 
@@ -52,12 +52,15 @@ if __name__ == "__main__":
     if args.m == 'train':
         if args.d is None:
             raise ValueError("must provide a dataset folder")
+        
         # create segmenter
         segmenter = UnetSegmenter(init_depth=args.depth)
         if args.load is not None:
             segmenter.load_model(args.load)
+
         # train
         segmenter.train(args.d, args.epochs)
+
         # save model
         if args.save is not None:
             segmenter.save_model(args.save)
@@ -65,15 +68,17 @@ if __name__ == "__main__":
     elif args.m == 'segment':
         if (args.d is None) and (args.i is None):
             raise ValueError("must provide a dataset folder or an image identifier")
-        # create segmenter
-        segmenter = UnetSegmenter(init_depth=args.depth)
-        if args.load is not None:
-            segmenter.load_model(args.load)
+        
         # segment folder
         if args.d:
-            segmenter.segment_folder(args.d, dest=args.dest, 
-                                     tsize=args.tsize, assess=args.a, 
-                                     transform=seg_postprocess(args.thresh))
+            # create segmenter
+            segmenter = UnetSegmenter(init_depth=args.depth)
+            if args.load is not None:
+                segmenter.load_model(args.load)
+            # segment
+            segmenter.segment_folder(args.d, dest=args.dest, tsize=args.tsize,
+                                     transform=seg_postprocess(args.thresh),
+                                     assess=args.a)
         # segment WSI
         if args.i:
             # check window
@@ -97,12 +102,20 @@ if __name__ == "__main__":
             }
             
             if window != []:
+                # create segmenter
+                segmenter = UnetSegmenter(init_depth=args.depth)
+                if args.load is not None:
+                    segmenter.load_model(args.load)
                 # compute polygons
                 polygons = segmenter.segment_wsi(cy_args, args.i, window,
                                           tsize=args.tsize,
                                           transform=seg_postprocess(args.thresh))
             else:
-                polygons = mp_segment_wsi(segmenter, args.i,
+                # create segmenter builder
+                seg_builder = UnetSegBuilder(init_depth=args.depth,
+                                             model_file=args.load)
+                # compute polygons
+                polygons = mp_segment_wsi(seg_builder, cy_args, args.i,
                                           w_width=15000, w_height=9000,
                                           tsize=args.tsize,
                                           transform=seg_postprocess(args.thresh))
@@ -112,13 +125,16 @@ if __name__ == "__main__":
     elif args.m == 'improve':
         if args.d is None:
             raise ValueError("must provide a dataset folder")
+        
         # create segmenter
         segmenter = UnetSegmenter(init_depth=args.depth)
         if args.load is not None:
             segmenter.load_model(args.load)
+        
         # data improvement
         segmenter.iter_data_imp(args.d, args.iters, args.epochs,
                                 transform=idi_postprocess(args.thresh))
+
         # save model
         if args.save is not None:
             segmenter.save_model(args.save)
