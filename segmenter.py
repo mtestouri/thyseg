@@ -56,7 +56,7 @@ class Segmenter:
 
     def _check_device(self, device):
         if device != 'cuda' and device != 'cpu':
-            raise ValueError("invalid device type : " + str(device))
+            raise ValueError("invalid device type: " + str(device))
 
     def set_device(self, device):
         """
@@ -438,18 +438,20 @@ class Segmenter:
             image_instance = ImageInstance().fetch(image_id)
 
             # window parameters
-            if len(window) == 4:
+            if window == []:
+                off_x = 0
+                off_y = 0
+                w_width = image_instance.width
+                w_height = image_instance.height
+                complete = True
+            elif len(window) == 4:
                 off_x = window[0]
                 off_y = window[1]
                 w_width = window[2]
                 w_height = window[3]
                 complete = False
             else:
-                off_x = 0
-                off_y = 0
-                w_width = image_instance.width
-                w_height = image_instance.height
-                complete = True
+                raise ValueError("invalid window: " + str(window))
 
             # overlap between tiles
             overlap = int(round(tsize / 4))
@@ -562,7 +564,7 @@ class Segmenter:
         return merged
 
     @staticmethod
-    def upload_annotations_job(cy_args, image_id, window, polygons):
+    def upload_annotations_job(cy_args, image_id, polygons, window=[]):
         """
         upload annotations to the Cytomine server
 
@@ -574,13 +576,13 @@ class Segmenter:
         image_id: int
             id of the WSI
 
+        polygons: iterable (size: m, subtype: shapely.geometry.Polygon)
+            an iterable of polygons objects corresponding to the annotations
+
         windows: int array
             the window where to upload the annotations
             the window is in the form : [off_x, off_y, width, height] and 
             the origin is the top left corner
-
-        polygons: iterable (size: m, subtype: shapely.geometry.Polygon)
-            an iterable of polygons objects corresponding to the annotations
         """
         
         with CytomineJob(host=cy_args['host'],
@@ -593,12 +595,14 @@ class Segmenter:
             image_instance = ImageInstance().fetch(image_id)
 
             # window parameters
-            if len(window) == 4:
+            if window == []:
+                off_x = 0
+                off_y = 0
+            elif len(window) == 4:
                 off_x = window[0]
                 off_y = window[1]
             else:
-                off_x = 0
-                off_y = 0
+                raise ValueError("invalid window: " + str(window))
 
             print("uploading annotations..")
             anns = AnnotationCollection()

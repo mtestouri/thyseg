@@ -85,9 +85,9 @@ if __name__ == "__main__":
                 try:
                     window = np.array(eval(args.w), dtype=np.int)
                 except:
-                    raise ValueError("invalid window : " + str(args.w))
+                    raise ValueError("invalid window: " + str(args.w))
                 if window.shape != (4,):
-                    raise ValueError("invalid window : " + str(args.w))
+                    raise ValueError("invalid window: " + str(args.w))
             else:
                 window = np.array(args.w, dtype=np.int)
 
@@ -119,7 +119,7 @@ if __name__ == "__main__":
                                           tsize=args.tsize,
                                           transform=seg_postprocess(args.thresh))
             # upload annotations
-            UnetSegmenter.upload_annotations_job(cy_args, args.i, window, polygons)
+            UnetSegmenter.upload_annotations_job(cy_args, args.i, polygons, window)
     
     elif args.m == 'improve':
         if args.d is None:
