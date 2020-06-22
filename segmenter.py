@@ -9,10 +9,10 @@ from shutil import copyfile
 from metrics import dice, jaccard
 from transforms import Resize
 
+from cytomine import Cytomine, CytomineJob
 from cytomine.models import ImageInstance, Annotation, AnnotationCollection
 from shapely.affinity import affine_transform
 from sldc import TileTopology, SemanticLocator, SemanticMerger
-from sldc_cytomine import CytomineSlide, CytomineTileBuilder
 from sldc_openslide import OpenSlideImage, OpenSlideTileBuilder
 
 
@@ -27,21 +27,53 @@ class Segmenter:
 
     parameters
     ----------
+    device: string
+        device to use for segmentation : 'cpu' or 'cuda'
+
     c_weights: float array
         class weights used for loss computation
     """
     
-    def __init__(self, c_weights=None):
-        if torch.cuda.is_available():
-            self._device = torch.device('cuda')
+    def __init__(self, device='cuda', c_weights=None):
+        # check device
+        self._check_device(device)
+        
+        # assign device
+        if device == 'cuda':
+            if torch.cuda.is_available():
+                self._device = torch.device('cuda')
+            else:
+                raise Exception("CUDA is not available")
         else:
             self._device = torch.device('cpu')
+
         self._model = None
         self._c_weights = c_weights
 
     def _check_model_init(self):
         if self._model is None:
             raise ValueError("variable 'self._model' not initialized")
+
+    def _check_device(self, device):
+        if device != 'cuda' and device != 'cpu':
+            raise ValueError("invalid device type : " + str(device))
+
+    def set_device(self, device):
+        """
+        assign the segmenter to a device and move the model to it
+
+        parameters
+        ----------
+        device: string
+            device to use for segmentation : 'cpu' or 'cuda'
+        """
+        
+        # checks
+        self._check_model_init()
+        self._check_device(device)
+        # move to new device
+        self._device = torch.device(device)
+        self._model = self._model.to(self._device)
 
     def save_model(self, model_file):
         """
@@ -372,56 +404,57 @@ class Segmenter:
                 y_pred = cv2.bitwise_or(y, y_pred)
                 cv2.imwrite(dest  + "/" + y_file[len(folder)+1:], y_pred)
 
-    def segment_wsi(self, image_id, window=[], tsize=512, batch_size=4, 
-                    transform=None, slide_type='openslide'):
+    def _create_wsi_dataset(self, cy_args, image_id, window=[], tsize=512):
         """
-        remote segmentation of a WSI
+        create a WSI tile dataset
 
         parameters
         ----------
+        cy_args: dict
+            dictionnary containing Cytomine arguments
+
         image_id: int
-            id of the WSI to segment
+            id of the WSI
 
         windows: int array
-            the window where to perform the segmentation, the window is in  
-            the form : [off_x, off_y, width, height] and the origin is the lower 
-            left corner
+            the window of the WSI to use
+            the window is in the form : [off_x, off_y, width, height] and 
+            the origin is the lower left corner
 
         tsize: int
             tile size
 
-        batch_size: int
-            batch size
-
-        transform: Transform
-            transform to apply to the predicted masks
-
-        slide_type: string
-            slide type : 'openslide' or 'cytomineslide'
+        Returns
+        -------
+        dataset: Dataset 
+            a dataset providing the WSI tiles
         """
+        
+        # create Cytomine context
+        with Cytomine(host=cy_args['host'],
+                      public_key=cy_args['public_key'],
+                      private_key=cy_args['private_key']) as conn:
 
-        # fetch wsi instance
-        image_instance = ImageInstance().fetch(image_id)
+            # fetch wsi instance
+            image_instance = ImageInstance().fetch(image_id)
 
-        # window parameters
-        if len(window) == 4:
-            off_x = window[0]
-            off_y = window[1]
-            w_width = window[2]
-            w_height = window[3]
-            complete = False
-        else:
-            off_x = 0
-            off_y = 0
-            w_width = image_instance.width
-            w_height = image_instance.height
-            complete = True
+            # window parameters
+            if len(window) == 4:
+                off_x = window[0]
+                off_y = window[1]
+                w_width = window[2]
+                w_height = window[3]
+                complete = False
+            else:
+                off_x = 0
+                off_y = 0
+                w_width = image_instance.width
+                w_height = image_instance.height
+                complete = True
 
-        # overlap between tiles
-        overlap = int(round(tsize / 4))
+            # overlap between tiles
+            overlap = int(round(tsize / 4))
 
-        # create OpenSlide image
-        if slide_type == 'openslide':
             # image file
             img_file = (CACHE + "/"
                         + str(image_instance.id) + "-"
@@ -450,22 +483,45 @@ class Segmenter:
                 raise ValueError("invalid image dimensions: expected " 
                                  + str((w_width, w_height)) + ", got "
                                  + str((wsi.width, wsi.height)))
-            # create dataset
-            dataset = TileDataset(wsi, tsize, tsize, overlap, 'openslide')
+        
+            # create and return dataset
+            return TileDataset(wsi, tsize, tsize, overlap)
 
-        # create CytomineSlide image
-        elif slide_type == 'cytomineslide':
-            # create slide image
-            if complete:
-                wsi = CytomineSlide(image_id)
-            else:
-                wsi = CytomineSlide(image_id).window((off_x, 
-                    image_instance.height - off_y - w_height), w_width, w_height)
-            # create dataset
-            dataset = TileDataset(wsi, tsize, tsize, overlap, 'cytomineslide')
-            
-        else:
-            raise ValueError("invalid slide type: " + str(slide_type))
+    def segment_wsi(self, cy_args, image_id, window=[], tsize=512, batch_size=4,
+                    transform=None):
+        """
+        segmentation of a WSI
+
+        parameters
+        ----------
+        cy_args: dict
+            dictionnary containing Cytomine arguments
+
+        image_id: int
+            id of the WSI to segment
+
+        windows: int array
+            the window where to perform the segmentation
+            the window is in the form : [off_x, off_y, width, height] and 
+            the origin is the lower left corner
+
+        tsize: int
+            tile size
+
+        batch_size: int
+            batch size
+
+        transform: Transform
+            transform to apply to the predicted masks
+
+        Returns
+        -------
+        polygons: iterable (size: m, subtype: shapely.geometry.Polygon)
+            an iterable of polygons objects corresponding to the masks
+        """
+
+        # create dataset
+        dataset = self._create_wsi_dataset(cy_args, image_id, window, tsize)
 
         # inits
         count = 0
@@ -508,33 +564,66 @@ class Segmenter:
         print("merging polygons..")
         merged = SemanticMerger(tolerance=1).merge(tile_ids, tile_polygons,
                                                    dataset.topology)
+        return merged
+
+    @staticmethod
+    def upload_annotations_job(cy_args, image_id, window, polygons):
+        """
+        upload annotations to the Cytomine server
+
+        parameters
+        ----------
+        cy_args: dict
+            dictionnary containing Cytomine arguments
+
+        image_id: int
+            id of the WSI
+
+        windows: int array
+            the window where to upload the annotations
+            the window is in the form : [off_x, off_y, width, height] and 
+            the origin is the lower left corner
+
+        polygons: iterable (size: m, subtype: shapely.geometry.Polygon)
+            an iterable of polygons objects corresponding to the annotations
+        """
         
-        # upload to cytomine
-        print("uploading annotations..")
-        anns = AnnotationCollection()
-        for polygon in merged:
-            anns.append(
-                Annotation(
-                location=self._change_referential(polygon, 
-                                                  off_x, off_y, w_height).wkt,
-                id_image=image_instance.id,
-                id_project=image_instance.project,
-                term=[FOREGROUND]
+        with CytomineJob(host=cy_args['host'],
+                         public_key=cy_args['public_key'],
+                         private_key=cy_args['private_key'],
+                         software_id=cy_args['software_id'],
+                         project_id=cy_args['project_id']) as job:
+            
+            # fetch wsi instance
+            image_instance = ImageInstance().fetch(image_id)
+
+            # window parameters
+            if len(window) == 4:
+                off_x = window[0]
+                off_y = window[1]
+                w_height = window[3]
+            else:
+                off_x = 0
+                off_y = 0
+                w_height = image_instance.height
+
+            print("uploading annotations..")
+            anns = AnnotationCollection()
+            for polygon in polygons:
+                anns.append(
+                    Annotation(
+                    location=_change_referential(polygon, off_x, off_y,
+                                                 w_height).wkt,
+                    id_image=image_instance.id,
+                    id_project=image_instance.project,
+                    term=[FOREGROUND]
+                    )
                 )
-            )
-        anns.save(n_workers=4)
+            anns.save(n_workers=4)
 
-    def _change_referential(self, p, off_x, off_y, w_height):
-        return affine_transform(p, [1, 0, 0, -1, off_x, off_y + w_height])
 
-    def _skip_tile(self, tile_id, topology):
-        tile_row, tile_col = topology._tile_coord(tile_id)
-        skip_bottom = (topology._image.height 
-                       % (topology._max_height - topology._overlap)) != 0
-        skip_right = (topology._image.width 
-                      % (topology._max_width - topology._overlap)) != 0
-        return (skip_bottom and tile_row == topology.tile_vertical_count - 1) or \
-               (skip_right and tile_col == topology.tile_horizontal_count - 1)
+def _change_referential(p, off_x, off_y, w_height):
+    return affine_transform(p, [1, 0, 0, -1, off_x, off_y + w_height])
 
 
 class ImgSet(Dataset):
@@ -624,7 +713,7 @@ class TileDataset(Dataset):
     parameters
     ----------
     wsi: Image
-        OpenSlideImage or CytomineSlide object
+        OpenSlideImage object
         
     tile_width: int
         tile width
@@ -634,23 +723,12 @@ class TileDataset(Dataset):
 
     overlap: int
         overlap between tiles
-
-    slide_type: string
-        slide type : 'openslide' or 'cytomineslide'
     """
     
-    def __init__(self, wsi, tile_width, tile_height, overlap, slide_type):
-        # tile builder
-        if slide_type == 'openslide':
-            tile_builder =  OpenSlideTileBuilder()
-        elif slide_type == 'cytomineslide':
-            tile_builder = CytomineTileBuilder(CACHE)
-        else:
-            raise ValueError("invalid slide type: " + str(slide_type))
-        
+    def __init__(self, wsi, tile_width, tile_height, overlap):
         self._wsi = wsi
         self._topology = TileTopology(
-            image=wsi, tile_builder=tile_builder,
+            image=wsi, tile_builder=OpenSlideTileBuilder(),
             max_width=tile_width, max_height=tile_height,
             overlap=overlap
         )
@@ -666,6 +744,7 @@ class TileDataset(Dataset):
         """
         returns (numpy image of a tile, tile identifier)
         """
+
         identifier = index + 1
         tile_np = self._topology.tile(identifier).np_image
         

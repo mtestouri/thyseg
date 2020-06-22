@@ -61,6 +61,9 @@ class UnetSegmenter(Segmenter):
 
     parameters
     ----------
+    device: string
+        device to use for segmentation : 'cpu' or 'cuda'
+
     init_depth: int
         initial number of filters, the number of filters is doubled at each 
         stages of the U-Net and thus this parameter controls the total 
@@ -73,12 +76,16 @@ class UnetSegmenter(Segmenter):
         class weights used for loss computation
     """
 
-    def __init__(self, init_depth=32, n_classes=2, c_weights=torch.Tensor([0, 1])):
-        super().__init__(c_weights)
+    def __init__(self, device='cuda', init_depth=32, n_classes=2,
+                 c_weights=torch.Tensor([0, 1])):
+        super().__init__(device, c_weights)
+        
+        # checks
         if init_depth < 1:
             raise ValueError("'init_depth' must be greater than 0")
         if n_classes < 2:
             raise ValueError("'n_classes' must be greater than 1")
+        
         self._model = Unet(init_depth, n_classes).to(self._device)
 
     def train(self, folder, n_epochs):

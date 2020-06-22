@@ -2,7 +2,7 @@ import sys
 import argparse
 import numpy as np
 from unet import UnetSegmenter, seg_postprocess, idi_postprocess
-from cytomine import CytomineJob, Cytomine
+from mpseg import mp_segment_wsi
 
 
 if __name__ == "__main__":
@@ -26,13 +26,11 @@ if __name__ == "__main__":
                         help='segmentation tile size')
     parser.add_argument('-dest', metavar='folder', default='segmentations',
                         help='segmentations destination folder')
-    parser.add_argument('-i', metavar='id', type=int, nargs='+',
-                        help='cytomine wsi identifiers')
-    parser.add_argument('-w', metavar='win', nargs='+', default=[],
-                        help='wsi windows in the form : [off_x,off_y,width,height]'
+    parser.add_argument('-i', metavar='id', type=int,
+                        help='cytomine wsi id')
+    parser.add_argument('-w', metavar='win', default=[],
+                        help='wsi window in the form : [off_x,off_y,width,height]'
                              + ' and the origin is the lower left corner')
-    parser.add_argument('-cs', action='store_true',
-                        help='flag to use CytomineSlide instead of OpenSlide')
     parser.add_argument('-a', action='store_true',
                         help='flag for model assessment')
     parser.add_argument('m', metavar='mode',
@@ -54,75 +52,74 @@ if __name__ == "__main__":
     if args.m == 'train':
         if args.d is None:
             raise ValueError("must provide a dataset folder")
-        
-        segmenter = UnetSegmenter(args.depth)
+        # create segmenter
+        segmenter = UnetSegmenter(init_depth=args.depth)
         if args.load is not None:
             segmenter.load_model(args.load)
+        # train
         segmenter.train(args.d, args.epochs)
+        # save model
         if args.save is not None:
             segmenter.save_model(args.save)
     
     elif args.m == 'segment':
         if (args.d is None) and (args.i is None):
             raise ValueError("must provide a dataset folder or an image identifier")
-        
-        segmenter = UnetSegmenter(args.depth)
+        # create segmenter
+        segmenter = UnetSegmenter(init_depth=args.depth)
         if args.load is not None:
             segmenter.load_model(args.load)
+        # segment folder
         if args.d:
             segmenter.segment_folder(args.d, dest=args.dest, 
                                      tsize=args.tsize, assess=args.a, 
                                      transform=seg_postprocess(args.thresh))
+        # segment WSI
         if args.i:
-            # check windows
-            windows = list()
-            for window in args.w:
+            # check window
+            if args.w != []:
                 try:
-                    window = np.array(eval(window), dtype=np.int)
+                    window = np.array(eval(args.w), dtype=np.int)
                 except:
-                    raise ValueError("invalid window : " + str(window))
+                    raise ValueError("invalid window : " + str(args.w))
                 if window.shape != (4,):
-                    raise ValueError("invalid window : " + str(window))
-                windows.append(window)
-            windows = np.array(windows, dtype=np.int)
-
-            # slide type
-            if args.cs:
-                slide_type = 'cytomineslide'
+                    raise ValueError("invalid window : " + str(args.w))
             else:
-                slide_type = 'openslide'
+                window = np.array(args.w, dtype=np.int)
 
-            # create Cytomine context
-            #with Cytomine(host=args.host,
-            #              public_key=args.public_key,
-            #              private_key=args.private_key) as conn:
-            with CytomineJob(host=args.host,
-                             public_key=args.public_key,
-                             private_key=args.private_key,
-                             software_id=args.cytomine_id_software,
-                             project_id=args.cytomine_id_project) as job:
-                
-                # remote segmentation
-                for image_id in args.i:
-                    if len(windows) > 0:
-                        for window in windows:
-                            segmenter.segment_wsi(image_id, window, args.tsize,
-                                        transform=seg_postprocess(args.thresh),
-                                        slide_type=slide_type)
-                    else:
-                        segmenter.segment_wsi(image_id, [], args.tsize, 
-                                        transform=seg_postprocess(args.thresh),
-                                        slide_type=slide_type)
+            # create Cytomine args dictionnary
+            cy_args = {
+                'host': args.host,
+                'public_key': args.public_key,
+                'private_key': args.private_key,
+                'software_id': args.cytomine_id_software,
+                'project_id': args.cytomine_id_project
+            }
+            
+            if window != []:
+                # compute polygons
+                polygons = segmenter.segment_wsi(cy_args, args.i, window,
+                                          tsize=args.tsize,
+                                          transform=seg_postprocess(args.thresh))
+            else:
+                polygons = mp_segment_wsi(segmenter, args.i,
+                                          w_width=15000, w_height=9000,
+                                          tsize=args.tsize,
+                                          transform=seg_postprocess(args.thresh))
+            # upload annotations
+            UnetSegmenter.upload_annotations_job(cy_args, args.i, window, polygons)
     
     elif args.m == 'improve':
         if args.d is None:
             raise ValueError("must provide a dataset folder")
-        
-        segmenter = UnetSegmenter(args.depth)
+        # create segmenter
+        segmenter = UnetSegmenter(init_depth=args.depth)
         if args.load is not None:
             segmenter.load_model(args.load)
+        # data improvement
         segmenter.iter_data_imp(args.d, args.iters, args.epochs,
                                 transform=idi_postprocess(args.thresh))
+        # save model
         if args.save is not None:
             segmenter.save_model(args.save)
     
