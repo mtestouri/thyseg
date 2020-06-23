@@ -14,6 +14,7 @@ from cytomine.models import ImageInstance, Annotation, AnnotationCollection
 from shapely.affinity import affine_transform
 from sldc import TileTopology, SemanticLocator, SemanticMerger
 from sldc_openslide import OpenSlideImage, OpenSlideTileBuilder
+import warnings
 
 
 FOREGROUND = 154005477  # foreground term id
@@ -458,7 +459,7 @@ class Segmenter:
 
             # image file
             img_file = (CACHE + "/"
-                        + str(image_instance.id) + "-"
+                        + str(image_id) + "-"
                         + str(off_x) + "-" + str(off_y) + "-"
                         + str(w_width) + "-" + str(w_height) + ".jpg")
             
@@ -477,9 +478,11 @@ class Segmenter:
             # create slide image
             wsi = OpenSlideImage(img_file)
             if (wsi.width != w_width) or (wsi.height != w_height):
-                raise ValueError("invalid image dimensions: expected " 
-                                 + str((w_width, w_height)) + ", got "
-                                 + str((wsi.width, wsi.height)))
+                msg = ("Invalid image dimensions: expected "
+                       + str((w_width, w_height)) + ", got "
+                       + str((wsi.width, wsi.height)) + ". "
+                       + "This can lead to inaccurate annotations.")
+                warnings.warn(msg)
         
             # create and return dataset
             return TileDataset(wsi, tsize, tsize, overlap)

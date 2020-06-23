@@ -1,7 +1,7 @@
-from torch.multiprocessing import Process, set_start_method
-
 import numpy as np
+from torch.multiprocessing import Process, set_start_method, Queue
 from torch.utils.data import Dataset, DataLoader
+from shapely.affinity import affine_transform
 
 from cytomine import Cytomine
 from cytomine.models import ImageInstance
@@ -9,66 +9,106 @@ from sldc import TileTopology, Tile, TileBuilder, SemanticMerger
 from sldc_cytomine import CytomineSlide
 
 
-def mp_segment_wsi(seg_builder, cy_args, image_id, w_width, w_height,
-                   tsize=512, transform=None):
+def mp_segment_wsi(seg_builder, cy_args, image_id, sup_window=[],
+                   wsize=[2048, 2048], tsize=512, transform=None):
         """
         
         """
+
+        # wsi window in which segmentation is done
+        if sup_window == []:
+            s_off_x = 0
+            s_off_y = 0
+            complete = True
+        elif len(sup_window) == 4:
+            s_off_x = sup_window[0]
+            s_off_y = sup_window[1]
+            s_w_width = sup_window[2]
+            s_w_height = sup_window[3]
+            complete = False
+        else:
+            raise ValueError("invalid super window: " + str(sup_window))
 
         # create Cytomine context
         with Cytomine(host=cy_args['host'],
                       public_key=cy_args['public_key'],
                       private_key=cy_args['private_key']) as conn:
+            
             # fetch wsi instance
             image_instance = ImageInstance().fetch(image_id)
-            # create slide image and dataset
-            dataset = WindowDataset(CytomineSlide(image_id), w_width, w_height,
-                                    overlap=tsize)
+            
+            # create slide image
+            if complete:
+                wsi = CytomineSlide(image_id)
+            else:
+                wsi = CytomineSlide(image_id).window((s_off_x, s_off_y),
+                                                     s_w_width, s_w_height)
+            # create dataset
+            dataset = WindowDataset(wsi, wsize[0], wsize[1], overlap=tsize)
 
         # inits
         count = 0
         set_start_method('spawn')
         window_polygons, window_ids = list(), list()
+        q = Queue()
 
         # compute mask polygons
         dl = DataLoader(dataset=dataset, batch_size=1)
         for x, ids in dl:
+            window = x.squeeze(0).numpy()
+            
+            # save referential offset
+            offset = (window[0], window[1])
+            
+            # change window referential
+            window[0] = window[0] + s_off_x
+            window[1] = window[1] + s_off_y
+
             # compute polygons in the window using a process
-            print(x.squeeze(0).numpy())
-            p = Process(target=_worker, args=(seg_builder, cy_args, 
-                                              image_instance.id,
-                                              x.squeeze(0).numpy(), 
-                                              tsize, transform))
+            p = Process(target=_worker, args=(q, seg_builder, cy_args, 
+                                              image_instance.id, window, 
+                                              offset, tsize, transform))
             p.start()
+            # collect the polygons from the process
+            polygons = q.get()
+            # wait process
             p.join()
             
-            # TODO change ref of polygons
-            # TODO check polygons shape
-            #window_polygons.append(polygons)
+            # store polygons
+            window_polygons.append(polygons)
+            window_ids.extend(ids.numpy())
             
-            #window_ids.extend(ids.numpy())
             count += x.shape[0]
             print(f'processed windows {count}/{len(dataset)}')
-        
-        return []
 
-        # merge polygons overlapping several tiles
+        # merge polygons overlapping several windows
         print("merging polygons..")
         merged = SemanticMerger(tolerance=1).merge(window_ids, window_polygons,
                                                    dataset.topology)
         return merged
 
 
-def _worker(seg_builder, cy_args, image_id, window, tsize, transform):
-    # create segmenter
-    segmenter = seg_builder.build()
-    # compute polygons
-    polygons = segmenter.segment_wsi(cy_args, image_id, window, tsize,
-                                     transform=transform)
+def _worker(queue, seg_builder, cy_args, image_id, window, offset, tsize, transform):
+    try:
+        # create segmenter
+        segmenter = seg_builder.build()
+        # compute polygons
+        polygons = segmenter.segment_wsi(cy_args, image_id, window, tsize,
+                                         transform=transform)
+        # change polygons referential
+        for i in range(len(polygons)):
+            polygons[i] = _change_referential(polygons[i], offset[0], offset[1])
+              
+    except Exception as e:
+        print(e)
+        polygons = []
+
+    # put the polygons on the queue
+    queue.put(polygons)
 
 
-def _change_referential(p, off_x, off_y, w_height):
-    return affine_transform(p, [1, 0, 0, -1, off_x, off_y + w_height])
+def _change_referential(p, off_x, off_y):
+    return affine_transform(p, [1, 0, 0, 1, off_x, off_y])
 
 
 #def _skip_tile(tile_id, topology):
@@ -122,8 +162,6 @@ class WindowDataset(Dataset):
 
         identifier = index + 1
         window = self._topology.tile(identifier).np_image
-        
-        # maybe TODO right and bottom padding
 
         return window, identifier
 

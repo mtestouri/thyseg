@@ -30,6 +30,8 @@ if __name__ == "__main__":
                         help='cytomine wsi id')
     parser.add_argument('-w', metavar='win', default=[],
                         help='wsi window in the form : [off_x,off_y,width,height]')
+    parser.add_argument('-wsize', metavar='size', default="[2048,2048]",
+                        help='wsi segmentation window size : [width,height]')
     parser.add_argument('-a', action='store_true',
                         help='flag for model assessment')
     parser.add_argument('m', metavar='mode',
@@ -91,6 +93,14 @@ if __name__ == "__main__":
             else:
                 window = np.array(args.w, dtype=np.int)
 
+            # check wsize
+            try:
+                wsize = np.array(eval(args.wsize), dtype=np.int)
+            except:
+                raise ValueError("invalid wsize: " + str(args.wsize))
+            if wsize.shape != (2,):
+                raise ValueError("invalid wsize: " + str(args.wsize))
+
             # create Cytomine args dictionnary
             cy_args = {
                 'host': args.host,
@@ -99,25 +109,13 @@ if __name__ == "__main__":
                 'software_id': args.cytomine_id_software,
                 'project_id': args.cytomine_id_project
             }
-            
-            if window != []:
-                # create segmenter
-                segmenter = UnetSegmenter(init_depth=args.depth)
-                if args.load is not None:
-                    segmenter.load_model(args.load)
-                # compute polygons
-                polygons = segmenter.segment_wsi(cy_args, args.i, window,
-                                          tsize=args.tsize,
-                                          transform=seg_postprocess(args.thresh))
-            else:
-                # create segmenter builder
-                seg_builder = UnetSegBuilder(init_depth=args.depth,
-                                             model_file=args.load)
-                # compute polygons
-                polygons = mp_segment_wsi(seg_builder, cy_args, args.i,
-                                          w_width=15000, w_height=9000,
-                                          tsize=args.tsize,
-                                          transform=seg_postprocess(args.thresh))
+
+            # create segmenter builder
+            seg_builder = UnetSegBuilder(init_depth=args.depth, model_file=args.load)
+            # compute polygons
+            polygons = mp_segment_wsi(seg_builder, cy_args, args.i, window,
+                                      wsize=wsize, tsize=args.tsize,
+                                      transform=seg_postprocess(args.thresh))
             # upload annotations
             UnetSegmenter.upload_annotations_job(cy_args, args.i, polygons, window)
     
