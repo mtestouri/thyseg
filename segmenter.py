@@ -487,7 +487,7 @@ class Segmenter:
             # create and return dataset
             return TileDataset(wsi, tsize, tsize, overlap)
 
-    def segment_wsi(self, cy_args, image_id, window=[], tsize=512, batch_size=4,
+    def segment_wsi(self, cy_args, image_id, window=[], tsize=512, batch_size=2,
                     transform=None):
         """
         segmentation of a WSI

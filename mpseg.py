@@ -51,6 +51,8 @@ def mp_segment_wsi(seg_builder, cy_args, image_id, sup_window=[],
         set_start_method('spawn')
         window_polygons, window_ids = list(), list()
         q = Queue()
+        max_procs = 2
+        nb_procs = 0
 
         # compute mask polygons
         dl = DataLoader(dataset=dataset, batch_size=1)
@@ -65,20 +67,32 @@ def mp_segment_wsi(seg_builder, cy_args, image_id, sup_window=[],
             window[1] = window[1] + s_off_y
 
             # compute polygons in the window using a process
-            p = Process(target=_worker, args=(q, seg_builder, cy_args, 
+            p = Process(target=_worker, args=(q, seg_builder, cy_args,
                                               image_instance.id, window, 
-                                              offset, tsize, transform))
+                                              offset, ids, tsize,
+                                              transform))
             p.start()
-            # collect the polygons from the process
-            polygons = q.get()
-            # wait process
-            p.join()
+
+            nb_procs += 1
+            if nb_procs < max_procs:
+                continue
             
-            # store polygons
+            # collect the polygons
+            (polygons, ids) = q.get()
             window_polygons.append(polygons)
             window_ids.extend(ids.numpy())
-            
-            count += x.shape[0]
+            count += 1
+            nb_procs -= 1
+
+            print(f'processed windows {count}/{len(dataset)}')
+
+        # collect remaining polygons
+        while count < len(dataset):
+            (polygons, ids) = q.get()
+            window_polygons.append(polygons)
+            window_ids.extend(ids.numpy())
+            count += 1
+
             print(f'processed windows {count}/{len(dataset)}')
 
         # merge polygons overlapping several windows
@@ -88,24 +102,25 @@ def mp_segment_wsi(seg_builder, cy_args, image_id, sup_window=[],
         return merged
 
 
-def _worker(queue, seg_builder, cy_args, image_id, window, offset, tsize, transform):
+def _worker(queue, seg_builder, cy_args, image_id, window, offset, ids, 
+            tsize, transform):
     try:
+        polygons = []
+        
         # create segmenter
         segmenter = seg_builder.build()
+        
         # compute polygons
         polygons = segmenter.segment_wsi(cy_args, image_id, window, tsize,
                                          transform=transform)
         # change polygons referential
         for i in range(len(polygons)):
             polygons[i] = _change_referential(polygons[i], offset[0], offset[1])
-              
-    except Exception as e:
-        print(e)
-        polygons = []
-
-    # put the polygons on the queue
-    queue.put(polygons)
-
+    
+    finally:
+        # put the polygons on the queue
+        queue.put((polygons, ids))
+    queue.put((polygons, ids))
 
 def _change_referential(p, off_x, off_y):
     return affine_transform(p, [1, 0, 0, 1, off_x, off_y])
