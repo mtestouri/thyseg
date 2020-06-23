@@ -10,7 +10,7 @@ from sldc_cytomine import CytomineSlide
 
 
 def mp_segment_wsi(seg_builder, cy_args, image_id, sup_window=[],
-                   wsize=[2048, 2048], tsize=512, transform=None):
+                   wsize=(2048, 2048), tsize=512, transform=None):
         """
         
         """
