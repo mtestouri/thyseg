@@ -11,84 +11,87 @@ from sldc_cytomine import CytomineSlide
 
 def mp_segment_wsi(seg_builder, cy_args, image_id, sup_window=[],
                    wsize=(2048, 2048), tsize=512, transform=None):
-        """
+    """
+    segment a WSI using processes
+    """
+
+    # wsi window in which segmentation is done
+    if sup_window == []:
+        s_off_x = 0
+        s_off_y = 0
+        complete = True
+    elif len(sup_window) == 4:
+        s_off_x = sup_window[0]
+        s_off_y = sup_window[1]
+        s_w_width = sup_window[2]
+        s_w_height = sup_window[3]
+        complete = False
+    else:
+        raise ValueError("invalid super window: " + str(sup_window))
+
+    # create Cytomine context
+    with Cytomine(host=cy_args['host'],
+                  public_key=cy_args['public_key'],
+                  private_key=cy_args['private_key']) as conn:
         
-        """
-
-        # wsi window in which segmentation is done
-        if sup_window == []:
-            s_off_x = 0
-            s_off_y = 0
-            complete = True
-        elif len(sup_window) == 4:
-            s_off_x = sup_window[0]
-            s_off_y = sup_window[1]
-            s_w_width = sup_window[2]
-            s_w_height = sup_window[3]
-            complete = False
+        # fetch wsi instance
+        image_instance = ImageInstance().fetch(image_id)
+        
+        # create slide image
+        if complete:
+            wsi = CytomineSlide(image_id)
         else:
-            raise ValueError("invalid super window: " + str(sup_window))
+            wsi = CytomineSlide(image_id).window((s_off_x, s_off_y),
+                                                 s_w_width, s_w_height)
+        # create dataset
+        dataset = WindowDataset(wsi, wsize[0], wsize[1], overlap=tsize)
 
-        # create Cytomine context
-        with Cytomine(host=cy_args['host'],
-                      public_key=cy_args['public_key'],
-                      private_key=cy_args['private_key']) as conn:
-            
-            # fetch wsi instance
-            image_instance = ImageInstance().fetch(image_id)
-            
-            # create slide image
-            if complete:
-                wsi = CytomineSlide(image_id)
-            else:
-                wsi = CytomineSlide(image_id).window((s_off_x, s_off_y),
-                                                     s_w_width, s_w_height)
-            # create dataset
-            dataset = WindowDataset(wsi, wsize[0], wsize[1], overlap=tsize)
+    # inits
+    count = 0
+    set_start_method('spawn')
+    window_polygons, window_ids = list(), list()
+    q = Queue()
 
-        # inits
-        count = 0
-        set_start_method('spawn')
-        window_polygons, window_ids = list(), list()
-        q = Queue()
+    # compute mask polygons
+    dl = DataLoader(dataset=dataset, batch_size=1)
+    for x, ids in dl:
+        window = x.squeeze(0).numpy()
+        
+        # save referential offset
+        offset = (window[0], window[1])
+        
+        # change window referential
+        window[0] = window[0] + s_off_x
+        window[1] = window[1] + s_off_y
+        
+        # compute polygons in the window using a process
+        p = Process(target=_worker, args=(q, seg_builder, cy_args, image_id, 
+                                          window, offset, tsize, transform))
+        p.start()
+        # collect the polygons from the process
+        polygons = q.get()
+        # wait process
+        p.join()
+        
+        # store polygons
+        window_polygons.append(polygons)
+        window_ids.extend(ids.numpy())
+        
+        count += x.shape[0]
+        print(f'processed windows {count}/{len(dataset)}')
 
-        # compute mask polygons
-        dl = DataLoader(dataset=dataset, batch_size=1)
-        for x, ids in dl:
-            window = x.squeeze(0).numpy()
-            
-            # save referential offset
-            offset = (window[0], window[1])
-            
-            # change window referential
-            window[0] = window[0] + s_off_x
-            window[1] = window[1] + s_off_y
-
-            # compute polygons in the window using a process
-            p = Process(target=_worker, args=(q, seg_builder, cy_args, 
-                                              image_instance.id, window, 
-                                              offset, tsize, transform))
-            p.start()
-            # collect the polygons from the process
-            polygons = q.get()
-            # wait process
-            p.join()
-            
-            # store polygons
-            window_polygons.append(polygons)
-            window_ids.extend(ids.numpy())
-            
-            count += x.shape[0]
-            print(f'processed windows {count}/{len(dataset)}')
-
-        # merge polygons overlapping several windows
-        print("merging polygons..")
-        merged = SemanticMerger(tolerance=1).merge(window_ids, window_polygons,
-                                                   dataset.topology)
-        return merged
+    # merge polygons overlapping several windows
+    print("merging polygons..")
+    merged = SemanticMerger(tolerance=1).merge(window_ids, window_polygons,
+                                               dataset.topology)
+    return merged
 
 
 def _worker(queue, seg_builder, cy_args, image_id, window, offset, tsize, transform):
+    """
+    worker process
+    """
+
     try:
         # create segmenter
         segmenter = seg_builder.build()
