@@ -10,7 +10,7 @@ from sldc_cytomine import CytomineSlide
 
 
 def mp_segment_wsi(seg_builder, cy_args, image_id, sup_window=[],
-                   wsize=(2048, 2048), tsize=512, transform=None):
+                   wsize=(2048, 2048), tsize=512, batch_size=4, transform=None):
     """
     segment a WSI using processes
     """
@@ -65,8 +65,9 @@ def mp_segment_wsi(seg_builder, cy_args, image_id, sup_window=[],
         window[1] = window[1] + s_off_y
         
         # compute polygons in the window using a process
-        p = Process(target=_worker, args=(q, seg_builder, cy_args, image_id, 
-                                          window, offset, tsize, transform))
+        p = Process(target=_worker, args=(q, seg_builder, cy_args, image_id,
+                                          window, offset, tsize, batch_size,
+                                          transform))
         p.start()
         # collect the polygons from the process
         polygons = q.get()
@@ -87,7 +88,8 @@ def mp_segment_wsi(seg_builder, cy_args, image_id, sup_window=[],
     return merged
 
 
-def _worker(queue, seg_builder, cy_args, image_id, window, offset, tsize, transform):
+def _worker(queue, seg_builder, cy_args, image_id, window, offset, tsize,
+            batch_size, transform):
     """
     worker process
     """
@@ -97,7 +99,7 @@ def _worker(queue, seg_builder, cy_args, image_id, window, offset, tsize, transf
         segmenter = seg_builder.build()
         # compute polygons
         polygons = segmenter.segment_wsi(cy_args, image_id, window, tsize,
-                                         transform=transform)
+                                         batch_size, transform)
         # change polygons referential
         for i in range(len(polygons)):
             polygons[i] = _change_referential(polygons[i], offset[0], offset[1])

@@ -284,6 +284,7 @@ class Segmenter:
                     image = images[j]
                     mask_p = masks_p[j]
                     mask = masks[j]
+                    index = (i * batch_size) + j + 1
 
                     # metrics
                     mask = mask.unsqueeze(0)
@@ -318,12 +319,12 @@ class Segmenter:
                                           sup_p, sep, 
                                           mask, sep, 
                                           mask_p), axis=1)
-                    cv2.imwrite(dest + "/seg" + str(i+1) + ".jpg", img)
+                    cv2.imwrite(dest + "/seg" + str(index) + ".jpg", img)
 
                     # display info
-                    print("segmentation: " + str(i+1) + "/" + str(len(dataset))
-                          + ", avg_dice: " + str(round(sum_dice/(i+1), 4))
-                          + ", avg_jaccard: " + str(round(sum_jaccard/(i+1), 4))
+                    print("segmentation: " + str(index) + "/" + str(len(dataset))
+                          + ", avg_dice: " + str(round(sum_dice/(index), 4))
+                          + ", avg_jaccard: " + str(round(sum_jaccard/(index), 4))
                           , end='\r')
 
         else:
@@ -333,6 +334,7 @@ class Segmenter:
 
                 for j in range(masks.shape[0]):
                     mask = masks[j]
+                    index = (i * batch_size) + j + 1
 
                     # convert tensor to numpy
                     mask = mask.permute(1, 2, 0).numpy()
@@ -347,7 +349,7 @@ class Segmenter:
                     cv2.imwrite(dest  + "/" + files_id[j] + "_y.jpg", mask)
     
                     # display info
-                    print(f'segmentation: {(i+1)}/{len(dataset)}', end='\r')
+                    print(f'segmentation: {index}/{len(dataset)}', end='\r')
         
         print("\nsegmentation done")
 

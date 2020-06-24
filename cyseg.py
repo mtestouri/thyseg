@@ -24,6 +24,8 @@ if __name__ == "__main__":
                         help='number of iterations in improve mode')
     parser.add_argument('-tsize', metavar='value', type=int, default=512,
                         help='segmentation tile size')
+    parser.add_argument('-bsize', metavar='value', type=int, default=4,
+                        help='segmentation batch size')
     parser.add_argument('-dest', metavar='folder', default='segmentations',
                         help='segmentations destination folder')
     parser.add_argument('-i', metavar='id', type=int,
@@ -77,9 +79,8 @@ if __name__ == "__main__":
             if args.load is not None:
                 segmenter.load_model(args.load)
             # segment
-            segmenter.segment_folder(args.d, dest=args.dest, tsize=args.tsize,
-                                     transform=seg_postprocess(args.thresh),
-                                     assess=args.a)
+            segmenter.segment_folder(args.d, args.dest, args.tsize, args.bsize,
+                                     seg_postprocess(args.thresh), args.a)
         # segment WSI
         if args.i:
             # check window
@@ -114,7 +115,7 @@ if __name__ == "__main__":
             seg_builder = UnetSegBuilder(init_depth=args.depth, model_file=args.load)
             # compute polygons
             polygons = mp_segment_wsi(seg_builder, cy_args, args.i, window,
-                                      wsize=wsize, tsize=args.tsize,
+                                      wsize, args.tsize, args.bsize,
                                       transform=seg_postprocess(args.thresh))
             # upload annotations
             UnetSegmenter.upload_annotations_job(cy_args, args.i, polygons, window)
