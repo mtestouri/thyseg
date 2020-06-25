@@ -9,6 +9,9 @@ from sldc import TileTopology, Tile, TileBuilder, SemanticMerger
 from sldc_cytomine import CytomineSlide
 
 
+WIN_MERGING = True
+
+
 def mp_segment_wsi(seg_builder, cy_args, image_id, sup_window=[],
                    wsize=(2048, 2048), tsize=512, batch_size=4, transform=None):
     """
@@ -75,17 +78,24 @@ def mp_segment_wsi(seg_builder, cy_args, image_id, sup_window=[],
         p.join()
         
         # store polygons
-        window_polygons.append(polygons)
-        window_ids.extend(ids.numpy())
+        if WIN_MERGING:
+            window_polygons.append(polygons)
+            window_ids.extend(ids.numpy())
+        else:
+            window_polygons.extend(polygons)
         
         count += x.shape[0]
         print(f'processed windows {count}/{len(dataset)}')
+    
+    if WIN_MERGING:
+        # merge polygons overlapping several windows
+        print("merging windows polygons..")
+        polygons = SemanticMerger(tolerance=1).merge(window_ids, window_polygons,
+                                                     dataset.topology)
+    else:
+        polygons = window_polygons
 
-    # merge polygons overlapping several windows
-    print("merging polygons..")
-    merged = SemanticMerger(tolerance=1).merge(window_ids, window_polygons,
-                                               dataset.topology)
-    return merged
+    return polygons
 
 
 def _worker(queue, seg_builder, cy_args, image_id, window, offset, tsize,
