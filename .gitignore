@@ -1,8 +1,7 @@
 .vscode/
 __pycache__/
-segmentations/
-results/
 __cache__/
+datasets/
 *.txt
 *.csv
 *.tar.gz
