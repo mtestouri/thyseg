@@ -1,4 +1,4 @@
-# Aerial lane segmentation
+# Cyseg
 ## Usage
 Get help : `python cyseg.py --help` <br>
 Training example : `python cyseg.py train -d datasets/train/ -epochs 5 -classes 2 -weights 0 1 -save unet.pth` <br>
