@@ -1,37 +1,6 @@
 import torch
 
 
-def dice_(y_pred, y):
-    """
-    compute the Dice coefficient
-    (might not be very accurate) 
-    
-    parameters
-    ----------
-    y_pred: tensor
-        predictions
-
-    y: tensor
-        targets
-
-    c_weights: float array
-        the class weights
-
-    returns
-    -------
-    dice: float
-        dice coefficient
-    """
-    
-    smooth = 1.
-    y_pred = torch.sigmoid(y_pred).view(len(y_pred), -1)
-    y = y.view(len(y), -1)
-    intersection = torch.sum(y_pred * y)
-    sum_a = torch.sum(y_pred * y_pred)
-    sum_b = torch.sum(y * y)
-    return ((2. * intersection + smooth) / (sum_a + sum_b + smooth))
-
-
 def dice(y_pred, y, c_weights=None):
     """
     compute the Dice coefficient
@@ -40,9 +9,11 @@ def dice(y_pred, y, c_weights=None):
     ----------
     y_pred: tensor
         predictions tensor of shape: (batch_size, n_channels, height, width)
+        tensor values must be in range [0, 1]
 
     y: tensor
         targets tensor of shape: (batch_size, n_channels, height, width)
+        tensor values must be in range [0, 1]
 
     c_weights: float array
         the class weights
@@ -70,9 +41,11 @@ def jaccard(y_pred, y, c_weights=None):
     ----------
     y_pred: tensor
         predictions tensor of shape: (batch_size, n_channels, height, width)
+        tensor values must be in range [0, 1]
 
     y: tensor
         targets tensor of shape: (batch_size, n_channels, height, width)
+        tensor values must be in range [0, 1]
 
     c_weights: float array
         class weights
@@ -88,20 +61,23 @@ def jaccard(y_pred, y, c_weights=None):
     elif len(c_weights) != y.shape[1]:
         raise ValueError("number of weights must be equal to the number of classes")
     elif torch.sum(c_weights) != 1:
-        c_weights = torch.softmax(c_weights)
+        c_weights = torch.softmax(c_weights, dim=0)
 
     sum_jacc = 0
     for i in range(y.shape[0]):
-        im_a = torch.round(torch.sigmoid(y_pred[i]))
-        im_b = torch.round(torch.sigmoid(y[i]))
+        im_a = torch.round(y_pred[i])
+        im_b = torch.round(y[i])
         
         jacc = 0
         for j in range(y.shape[1]):
             a = im_a[j, :, :]
             b = im_b[j, :, :]
-            intersection = torch.relu(a + b - 1)
-            union = torch.ceil((a + b) / 2)
-            jacc += ((torch.sum(intersection) / torch.sum(union)) * c_weights[j])
+            intersection = torch.sum(torch.relu(a + b - 1))
+            union = torch.sum(torch.ceil((a + b) / 2))
+            if union != 0:
+                jacc += ((intersection / union) * c_weights[j])
+            else:
+                jacc += (1 * c_weights[j])
         
         sum_jacc += jacc
     return sum_jacc / y.shape[0]

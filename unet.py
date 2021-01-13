@@ -1,34 +1,19 @@
-import sys
-from segmenter import Segmenter, ImgSet, SegmenterBuilder
-from transforms import Resize, Threshold, Normalize, Smoothing, ErodeDilate
+from segmenter import Segmenter
+from datasets import ImgDataset, TileDataset
+from transforms import Resize, Threshold
 from metrics import dice
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torchvision import transforms
-import math
 
 
-def seg_postprocess(thresh=0.5):
+def pred_pp(thresh=0.5):
     """
-    segmentation post-processing
-    """
-    return transforms.Compose([
-            ErodeDilate(),
-            Smoothing(),
-            Threshold(thresh)
-        ])
-
-
-def idi_postprocess(thresh=0.5):
-    """
-    iterative data improvement post-processing
+    prediction post-processing
     """
     return transforms.Compose([
-            Normalize(),
-            ErodeDilate(),
-            Smoothing(),
             Threshold(thresh)
         ])
 
@@ -48,7 +33,7 @@ class SegLoss(nn.Module):
     """
     def __init__(self, c_weights=None):
         super().__init__()
-        self._bce_loss = nn.BCEWithLogitsLoss()
+        self._bce_loss = nn.BCELoss()
         self._c_weights = c_weights
 
     def forward(self, y_pred, y):
@@ -61,34 +46,29 @@ class UnetSegmenter(Segmenter):
 
     parameters
     ----------
-    device: string
-        device to use for segmentation : 'cpu' or 'cuda'
+    n_classes: int
+        number of classes
+
+    c_weights: float array
+        class weights used for loss computation
 
     init_depth: int
         initial number of filters, the number of filters is doubled at each 
         stages of the U-Net and thus this parameter controls the total 
         number of filters in the network
 
-    n_classes: int
-        number of classes
-
-    c_weights: float array
-        class weights used for loss computation
+    device: string
+        device to use for segmentation : 'cpu' or 'cuda'
     """
 
-    def __init__(self, device='cuda', init_depth=32, n_classes=2,
-                 c_weights=torch.Tensor([0, 1])):
-        super().__init__(device, c_weights)
+    def __init__(self, n_classes=2, c_weights=None, init_depth=32, device='cuda'):
+        super().__init__(n_classes, c_weights, device)
         
-        # checks
         if init_depth < 1:
-            raise ValueError("'init_depth' must be greater than 0")
-        if n_classes < 2:
-            raise ValueError("'n_classes' must be greater than 1")
-        
+            raise ValueError("'init_depth' must be greater or equal to 1")
         self._model = Unet(init_depth, n_classes).to(self._device)
 
-    def train(self, folder, n_epochs):
+    def train(self, folder, n_epochs, tsize=512):
         """
         train the model
 
@@ -99,58 +79,59 @@ class UnetSegmenter(Segmenter):
 
         n_epochs: int
             number of training epochs
+
+        tsize: int
+            segmentation tile size
         """
 
-        print("training the model..")
         if n_epochs < 1:
-            raise ValueError("'n_epochs' must be greater than 0")
+            raise ValueError("'n_epochs' must be greater or equal to 1")
 
         # training parameters
-        batch_size = 1
         learning_rate = 0.0001
         criterion = SegLoss(self._c_weights) # custom loss
         optimizer = torch.optim.Adam(self._model.parameters(), lr=learning_rate)
         
         # inits
-        dataset = ImgSet(folder)
-        n_iterations = math.ceil(len(dataset)/batch_size)
         self._model.train()
         tf_resize = Resize()
+        dataset = ImgDataset(folder)
 
         # training loop
-        dl = DataLoader(dataset=dataset, batch_size=batch_size, num_workers=2)
         for epoch in range(n_epochs):
-            print('')
-            
+            img_count = 0
             sum_loss = 0
-            sum_dice = 0
-            for i, (x, y, _) in enumerate(dl):
-                # batch
-                x = x.to(self._device)
-                y = y.to(self._device)
-                
-                # forward pass
-                y_pred = self._model(x)
-                if y_pred.shape != y.shape:
-                    for j in range(y.shape[0]):
-                        y[j] = tf_resize(y[j].cpu(), (y_pred.shape[2],
-                                         y_pred.shape[3])).to(self._device)
-                loss = criterion(y_pred, y)
-                sum_loss += loss.item()
-                sum_dice += dice_loss(y_pred, y).item() # compute dice loss
-                
-                # backward pass
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-                
-                # verbose
-                sys.stdout.write("\033[F") # move cursor up
-                sys.stdout.write("\033[K") # clear line
-                print("epoch: " + str(epoch+1) + "/" + str(n_epochs)
-                      + ", step: " + str(i+1) + "/" + str(n_iterations)
-                      + ", avg_loss: " + str(round(sum_loss/(i + 1), 4))
-                      + ", avg_dice_loss: " + str(round(sum_dice/(i + 1), 4)))
+            tile_count = 0
+            
+            for image, mask in dataset:
+                tile_dataset = TileDataset(image, mask, tsize=tsize,
+                                           mask_merge=(self._n_classes <= 2))
+                tile_loader = DataLoader(tile_dataset, batch_size=1)
+
+                for i, (x, y, _) in enumerate(tile_loader):
+                    # batch
+                    x = x.to(self._device)
+                    y = y.to(self._device)
+
+                    # forward pass
+                    y_pred = self._model(x)
+                    if y_pred.shape != y.shape:
+                        y = tf_resize(y, (y_pred.shape[2], y_pred.shape[3]))
+                    loss = criterion(y_pred, y)
+                    sum_loss += loss.item()
+
+                    # backward pass
+                    optimizer.zero_grad()
+                    loss.backward()
+                    optimizer.step()
+
+                    # verbose
+                    tile_count += 1
+                    print("epoch: " + str(epoch+1) + "/" + str(n_epochs)
+                          + ", image: " + str(img_count+1) + "/" + str(len(dataset))
+                          + ", iteration: " + str(i+1) + "/" + str(len(tile_dataset))
+                          + ", avg_loss: " + str(round(sum_loss/tile_count, 4)))
+                img_count += 1
         print("training done")
 
 
@@ -189,6 +170,12 @@ class Unet(nn.Module):
         self.up_conv9 = UpConvBlock(in_ch, out_ch)
         in_ch = out_ch
         self.conv10 = nn.Conv2d(in_ch, n_classes, 1)
+        
+        # output
+        if n_classes > 1:
+            self.output = nn.Softmax(dim=1)
+        else:
+            self.output = nn.Sigmoid()
     
     def forward(self, x):
         # encoder
@@ -204,7 +191,7 @@ class Unet(nn.Module):
         x = self.up_conv8(x, self.conv2.skip_x)
         x = self.up_conv9(x, self.conv1.skip_x)
         x = self.conv10(x)
-        return x
+        return self.output(x)
 
 
 class ConvBlock(nn.Module):
@@ -248,60 +235,3 @@ class UpConvBlock(nn.Module):
 
         x = torch.cat([x, skip_x], dim=1)
         return F.relu(self.conv2(F.relu(self.conv1(x))))
-
-
-class UnetSegBuilder(SegmenterBuilder):
-    """
-    build a UnetSegmenter object
-
-    parameters
-    ----------
-    device: string
-        device to use for segmentation : 'cpu' or 'cuda'
-
-    init_depth: int
-        initial number of filters, the number of filters is doubled at each 
-        stages of the U-Net and thus this parameter controls the total 
-        number of filters in the network
-
-    n_classes: int
-        number of classes
-
-    c_weights: float array
-        class weights used for loss computation
-
-    model_file: string
-        model file to load
-    """
-
-    def __init__(self, device='cuda', init_depth=32, n_classes=2,
-                 c_weights=torch.Tensor([0, 1]), model_file=None):
-        self._device = device
-        self._init_depth = init_depth
-        self._n_classes = n_classes
-        self._c_weights = c_weights
-        self._model_file = model_file
-    
-    def build(self):
-        """
-        build a UnetSegmenter object
-
-        Returns
-        -------
-        segmenter: UnetSegmenter
-            the built UnetSegmenter object
-        """
-
-        # create segmenter
-        segmenter = UnetSegmenter(
-            self._device,
-            self._init_depth,
-            self._n_classes,
-            self._c_weights,
-        )
-        
-        # load model
-        if self._model_file is not None:
-            segmenter.load_model(self._model_file)
-
-        return segmenter
